@@ -1,0 +1,107 @@
+name: Build VirtualDAP
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    # ------------------------------------------------------------------
+    # 1. Setup Build Environment (NDK & Java)
+    # ------------------------------------------------------------------
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android NDK
+      uses: android-actions/setup-android@v2
+    
+    - name: Install NDK and CMake
+      run: sdkmanager "cmake;3.22.1" "ndk;25.2.9519653"
+
+    # ------------------------------------------------------------------
+    # 2. Build Virtual Audio HAL (.so)
+    # ------------------------------------------------------------------
+    - name: Build HAL with CMake
+      run: |
+        mkdir -p guest_os/build
+        cd guest_os/build
+        
+        # Point to the NDK toolchain
+        NDK_ROOT=${ANDROID_HOME}/ndk/25.2.9519653
+        cmake \
+          -DCMAKE_TOOLCHAIN_FILE=$NDK_ROOT/build/cmake/android.toolchain.cmake \
+          -DANDROID_ABI=x86_64 \
+          -DANDROID_PLATFORM=android-29 \
+          ..
+          
+        make
+        
+        # Verify output
+        ls -l audio.primary.virtualdap.so
+        cd ../..
+
+    # ------------------------------------------------------------------
+    # 3. Guest OS Injection (The "Pre-built Image Strategy")
+    # ------------------------------------------------------------------
+    - name: Prepare Guest OS Assets
+      run: |
+        mkdir -p app/src/main/assets/system
+        
+        # [Strategy] Download a lightweight base image or mock it
+        # In a real scenario, curl -L -o base_output.zip <URL_TO_GENERIC_ANDROID_IMAGE>
+        # For this demo, we create a dummy "system.img" to represent the container rootfs
+        
+        echo "Creating Mock Guest OS Image..."
+        dd if=/dev/zero of=guest_system.img bs=1M count=10
+        
+        # [Injection]
+        # In this simplified step, we bundle the HAL configuration into a zip 
+        # that the Host App will unzip into the container at runtime.
+        # Structure: /custom_mod/system/lib/...
+        
+        mkdir -p custom_mod/system/lib64/hw/
+        mkdir -p custom_mod/system/etc/
+        
+        cp guest_os/build/audio.primary.virtualdap.so custom_mod/system/lib64/hw/
+        cp guest_os/dumper_policy_configuration.xml custom_mod/system/etc/audio_policy_configuration.xml
+        
+        # Zip the mods
+        cd custom_mod
+        zip -r ../mod_package.zip .
+        cd ..
+        
+        # Copy to assets
+        cp mod_package.zip app/src/main/assets/
+        cp guest_system.img app/src/main/assets/
+        
+        echo "Assets Prepared."
+        ls -R app/src/main/assets/
+
+    # ------------------------------------------------------------------
+    # 4. Build Host Application (APK)
+    # ------------------------------------------------------------------
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      working-directory: ./
+      
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug
+      
+    # ------------------------------------------------------------------
+    # 5. Upload Artifacts
+    # ------------------------------------------------------------------
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: app-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
