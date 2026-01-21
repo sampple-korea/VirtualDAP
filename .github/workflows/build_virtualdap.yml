@@ -28,7 +28,7 @@ jobs:
     - name: Install NDK and CMake
       run: |
         yes | sdkmanager --licenses || true
-        sdkmanager "cmake;3.22.1" "ndk;25.2.9519653"
+        yes | sdkmanager "cmake;3.22.1" "ndk;25.2.9519653"
 
     # ------------------------------------------------------------------
     # 2. Build Virtual Audio HAL (.so)
