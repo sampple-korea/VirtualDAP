@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -231,6 +232,37 @@ private fun MusicSpaceScreen(
     onRefresh: () -> Unit,
 ) {
     val busy = snapshot.phase == ContainerPhase.INITIALIZING || snapshot.phase == ContainerPhase.INSTALLING
+    var chooseInstalled by rememberSaveable { mutableStateOf(false) }
+    if (chooseInstalled) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { chooseInstalled = false },
+            title = { Text("Add an installed music app") },
+            text = {
+                Column {
+                    Text("Copies the app into your music space, not its accounts or private data. Sign in separately inside the imported app.")
+                    Spacer(Modifier.height(12.dp))
+                    if (snapshot.hostApplications.isEmpty()) {
+                        Text("No catalog music apps were found on this device. Install one from its usual store, then refresh this list, or choose an APK file.")
+                    } else {
+                        LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(snapshot.hostApplications, key = { it.packageName }) { app ->
+                                OutlinedButton(
+                                    onClick = {
+                                        chooseInstalled = false
+                                        ContainerRuntime.importHostApp(app.packageName)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text(app.name) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { chooseInstalled = false }) { Text("Close") }
+            },
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
@@ -261,6 +293,11 @@ private fun MusicSpaceScreen(
                         Text("Refresh")
                     }
                 }
+                OutlinedButton(
+                    onClick = { onRefresh(); chooseInstalled = true },
+                    enabled = snapshot.phase == ContainerPhase.READY,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add from installed apps") }
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "Uses Android ${Build.VERSION.RELEASE} on this device. Install only trusted apps: data is stored separately, but this container is not a security sandbox.",

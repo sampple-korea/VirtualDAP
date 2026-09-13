@@ -33,11 +33,14 @@ playback head.
 ## Music application compatibility target
 
 The intended capture point is shared by standard audio clients, not app-specific. Apple Music, Spotify, YouTube Music, TIDAL,
-Qobuz, Amazon Music, Deezer, SoundCloud, Bandcamp, Plexamp, Poweramp, Neutron, USB Audio Player
-PRO (using its Android/AudioTrack driver), foobar2000 and other standard AudioTrack clients use the
+Qobuz, Amazon Music, Deezer, SoundCloud, Bandcamp, Plexamp, Poweramp, Neutron,
+foobar2000 and other standard AudioTrack clients use the
 same intended PCM path. Catalog inclusion is not proof that installation, login, decoding and
 playback have been verified for that service. Individual compatibility results must be recorded
 before any service is labeled verified.
+
+UAPP is an audio-engine implementation reference, not a catalog music service or runtime dependency.
+USB output, DoP, native DSD and DSD-to-PCM functionality belong inside VirtualDAP.
 
 Subscriptions, regional restrictions, service login, Widevine, Play Integrity and guest image
 certification remain controlled by each provider. VirtualDAP does not bypass DRM or attestation.

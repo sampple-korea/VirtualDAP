@@ -30,7 +30,6 @@ object MusicAppCatalog {
         target("Plexamp", "tv.plex.labs.plexamp", AppAudioPath.SYSTEM_PCM),
         target("Poweramp", "com.maxmpz.audioplayer", AppAudioPath.LOCAL_HI_RES_PCM),
         target("Neutron Player", "com.neutroncode.mp", AppAudioPath.LOCAL_HI_RES_PCM),
-        target("USB Audio Player PRO", "com.extreamsd.usbaudioplayerpro", AppAudioPath.LOCAL_HI_RES_PCM),
         target("foobar2000", "com.foobar2000.foobar2000", AppAudioPath.LOCAL_HI_RES_PCM),
         target("Bandcamp", "com.bandcamp.android"),
         target("Pandora", "com.pandora.android"),

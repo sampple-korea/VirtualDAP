@@ -13,6 +13,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import java.util.zip.ZipFile
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import com.virtualdap.host.model.MusicAppCatalog
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +44,7 @@ data class ContainerSnapshot(
     val applications: List<ContainerApp> = emptyList(),
     val detail: String = "Preparing the music space",
     val lastError: String? = null,
+    val hostApplications: List<ContainerApp> = emptyList(),
 )
 
 /** Ordinary-UID application container. It does not start a separate Android OS or an AVF VM. */
@@ -51,6 +56,7 @@ object ContainerRuntime {
     val state = mutableState.asStateFlow()
     private var hostContext: Context? = null
     private var attached = false
+    private val pendingLaunches = ConcurrentHashMap<String, String>()
 
     fun attach(context: Context) {
         hostContext = context
@@ -126,29 +132,68 @@ object ContainerRuntime {
         }
     }
 
-    fun install(uri: Uri) {
+    fun install(uri: Uri) = importPackage { context, staging ->
+        val source = File(staging, "package.apk")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(source).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var bytes = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    bytes += count
+                    require(bytes <= MAX_IMPORT_BYTES) { "App package exceeds 2 GiB" }
+                    output.write(buffer, 0, count)
+                }
+                output.fd.sync()
+            }
+        } ?: error("Could not open the selected file")
+        source
+    }
+
+    /** Copy APK code only; host app accounts, private data and permissions are never copied. */
+    fun importHostApp(packageName: String) = importPackage { context, staging ->
+        require(MusicAppCatalog.popularApps.any { it.packageName == packageName }) { "Not a catalog music app" }
+        val info = context.packageManager.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
+        val files = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty()
+        val bundle = File(staging, "installed-app.apks")
+        var total = 0L
+        FileOutputStream(bundle).use { stream ->
+            ZipOutputStream(stream).use { zip ->
+                files.forEachIndexed { index, path ->
+                    zip.putNextEntry(ZipEntry(if (index == 0) "base.apk" else "split-$index.apk"))
+                    File(path).inputStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= MAX_IMPORT_BYTES) { "Installed APK set exceeds 2 GiB" }
+                            zip.write(buffer, 0, count)
+                        }
+                    }
+                    zip.closeEntry()
+                }
+                zip.finish()
+                stream.fd.sync()
+            }
+        }
+        bundle
+    }
+
+    private fun importPackage(prepare: (Context, File) -> File) {
         val context = hostContext ?: return
-        if (mutableState.value.phase != ContainerPhase.READY) return
-        mutableState.update { it.copy(phase = ContainerPhase.INSTALLING, detail = "Checking the app package", lastError = null) }
+        val previous = mutableState.value
+        if (previous.phase != ContainerPhase.READY ||
+            !mutableState.compareAndSet(previous, previous.copy(
+                phase = ContainerPhase.INSTALLING, detail = "Preparing and checking the app package", lastError = null,
+            ))
+        ) return
         scope.launch {
             val staging = File(context.cacheDir, "container-import-${UUID.randomUUID()}")
             try {
                 check(staging.mkdir()) { "Could not create the app import directory" }
-                var source = File(staging, "package.apk")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(source).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var bytes = 0L
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            bytes += count
-                            require(bytes <= MAX_IMPORT_BYTES) { "App package exceeds 2 GiB" }
-                            output.write(buffer, 0, count)
-                        }
-                        output.fd.sync()
-                    }
-                } ?: error("Could not open the selected file")
+                var source = prepare(context, staging)
                 if (validateArchive(source)) {
                     val bundle = File(staging, "package.apks")
                     check(source.renameTo(bundle)) { "Could not stage the APK bundle" }
@@ -182,18 +227,46 @@ object ContainerRuntime {
 
     fun launch(packageName: String) {
         if (mutableState.value.phase != ContainerPhase.READY) return
+        val request = UUID.randomUUID().toString()
+        val previousPid = mutableState.value.applications.firstOrNull { it.packageName == packageName }?.lastStartedPid
+        pendingLaunches[packageName] = request
+        mutableState.update { it.copy(
+            applications = it.applications.map { app ->
+                if (app.packageName == packageName) app.copy(lastStartedPid = null) else app
+            },
+            detail = "Starting $packageName", lastError = null,
+        ) }
         scope.launch {
             try {
+                if (pendingLaunches[packageName] != request) return@launch
+                check(mutableState.value.applications.any { it.packageName == packageName }) { "App is not installed in the music space" }
                 withTimeout(5_000) { PipelineStore.state.first { it.enabled } }
+                if (pendingLaunches[packageName] != request) return@launch
                 check(BlackBoxCore.get().launchApk(packageName, USER)) { "No launchable activity was found" }
-                mutableState.update { it.copy(detail = "Launch requested for $packageName", lastError = null) }
+                if (previousPid != null && hostContext?.getSystemService(android.app.ActivityManager::class.java)
+                        ?.runningAppProcesses.orEmpty().any { it.pid == previousPid }
+                ) appStarted(packageName, previousPid)
+                withTimeout(30_000) {
+                    mutableState.first { snapshot ->
+                        pendingLaunches[packageName] != request ||
+                            snapshot.applications.any { it.packageName == packageName && it.lastStartedPid != null }
+                    }
+                }
+                pendingLaunches.remove(packageName, request)
             } catch (error: Throwable) {
-                mutableState.update { it.copy(lastError = "Could not launch $packageName: ${error.message}") }
+                if (pendingLaunches.remove(packageName, request)) {
+                    val message = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                        "$packageName did not finish startup. Check app/Android/CPU compatibility and Diagnostics."
+                    } else "Could not launch $packageName: ${error.message}"
+                    mutableState.update { it.copy(lastError = message, detail = "App startup failed") }
+                    PipelineStore.log(message, LogLevel.ERROR)
+                }
             }
         }
     }
 
     fun stop(packageName: String) {
+        pendingLaunches.remove(packageName)
         scope.launch {
             try {
                 BlackBoxCore.get().stopPackage(packageName, USER)
@@ -227,16 +300,28 @@ object ContainerRuntime {
     private fun loadApplications() {
         val context = hostContext ?: return
         val previous = mutableState.value.applications.associateBy { it.packageName }
+        val runningPids = context.getSystemService(android.app.ActivityManager::class.java)
+            .runningAppProcesses.orEmpty().map { it.pid }.toSet()
         val apps = BlackBoxCore.get().getInstalledApplications(0, USER).map { info ->
             ContainerApp(
                 packageName = info.packageName,
                 name = runCatching { info.loadLabel(context.packageManager).toString() }.getOrDefault(info.packageName),
                 minimumApi = info.minSdkVersion,
-                lastStartedPid = previous[info.packageName]?.lastStartedPid,
+                lastStartedPid = previous[info.packageName]?.lastStartedPid?.takeIf { it in runningPids },
             )
         }.sortedBy { it.name.lowercase() }
         mutableState.value = ContainerSnapshot(
             ContainerPhase.READY, apps, "Android ${Build.VERSION.RELEASE} app container · no root required",
+            hostApplications = MusicAppCatalog.popularApps.mapNotNull { candidate ->
+                try {
+                    val installed = context.packageManager.getApplicationInfo(
+                        candidate.packageName, PackageManager.ApplicationInfoFlags.of(0),
+                    )
+                    if (!installed.enabled) null else ContainerApp(
+                        candidate.packageName, candidate.name, installed.minSdkVersion,
+                    )
+                } catch (_: PackageManager.NameNotFoundException) { null }
+            },
         )
     }
 

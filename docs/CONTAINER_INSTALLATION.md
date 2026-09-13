@@ -4,6 +4,11 @@ Imports run as the normal Android application UID. Only APKs selected by the use
 the host does not request unrestricted storage or install-package privileges. Hosted app data uses
 separate directories, but the shared-UID container is **not a security sandbox**. Install trusted apps.
 
+The installed-app picker queries only declared catalog package names, not the complete device app
+inventory. It copies base/split APK code from the selected installed app into a bounded private ZIP
+and uses the same manifest/signature/atomic-publication path. Private app data and accounts are not
+read or migrated. A concurrent store update that produces mismatched versions/signatures is rejected.
+
 ## APK sets
 
 The ZIP importer bounds APK count and expanded package bytes and rejects duplicate flattened

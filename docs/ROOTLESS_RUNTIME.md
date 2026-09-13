@@ -41,6 +41,10 @@ transport, conversion and selected/actual output separately.
 
 ## UAPP reference inspection
 
+UAPP is a reference for implementing VirtualDAP's own USB/DSD audio engine, not an app that users
+must install, launch or select from the music-service catalog. Earlier installer/ABI smoke probes
+using its supplied APK were temporary engineering tests, not the intended product integration.
+
 The user-provided APK set identifies itself as USB Audio Player PRO 7.1.2.3 (7123). Inspection found:
 
 - normal Android USB permission/open-device calls followed by transfer of the granted file descriptor;

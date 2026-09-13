@@ -34,6 +34,33 @@ class ContainerInstrumentedTest {
         ).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
         await("container initialization") { ContainerRuntime.state.value.phase != ContainerPhase.INITIALIZING }
         assertEquals(ContainerRuntime.state.value.toString(), ContainerPhase.READY, ContainerRuntime.state.value.phase)
+        val externalName = InstrumentationRegistry.getArguments().getString("externalApk")
+        val hostPackage = InstrumentationRegistry.getArguments().getString("hostPackage")
+        if (externalName != null || hostPackage != null) {
+            val expected = requireNotNull(InstrumentationRegistry.getArguments().getString("externalPackage"))
+            if (hostPackage != null) {
+                assertTrue("Host app should be discoverable",
+                    ContainerRuntime.state.value.hostApplications.any { it.packageName == hostPackage })
+                ContainerRuntime.importHostApp(hostPackage)
+            } else {
+                requireNotNull(externalName)
+                require(externalName.matches(Regex("[A-Za-z0-9_.-]+"))) { "Use a single private cache filename" }
+                val file = File(context.cacheDir, externalName)
+                require(file.isFile) { "Copy the APK/APKS into the debug host's private cache first" }
+                ContainerRuntime.install(Uri.fromFile(file))
+            }
+            await("external APK import") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
+            assertEquals(ContainerRuntime.state.value.toString(), null, ContainerRuntime.state.value.lastError)
+            assertTrue(ContainerRuntime.state.value.toString(),
+                ContainerRuntime.state.value.applications.any { it.packageName == expected })
+            if (InstrumentationRegistry.getArguments().getString("importOnly") == "true") return
+            AudioPipelineService.command(context, AudioPipelineService.ACTION_START)
+            ContainerRuntime.launch(expected)
+            await("external Application.onCreate (not a playback certification)") {
+                ContainerRuntime.state.value.applications.any { it.packageName == expected && it.lastStartedPid != null }
+            }
+            return
+        }
         val fixture = File(context.cacheDir, "instrumented-music-fixture.apk")
         try {
             instrumentation.context.assets.open("music-fixture.apk").use { input ->

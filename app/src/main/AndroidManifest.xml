@@ -10,6 +10,31 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
+        <package android:name="com.apple.android.music" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.aspiro.tidal" />
+        <package android:name="com.qobuz.music" />
+        <package android:name="com.amazon.mp3" />
+        <package android:name="deezer.android.app" />
+        <package android:name="com.soundcloud.android" />
+        <package android:name="tv.plex.labs.plexamp" />
+        <package android:name="com.maxmpz.audioplayer" />
+        <package android:name="com.neutroncode.mp" />
+        <package android:name="com.foobar2000.foobar2000" />
+        <package android:name="com.bandcamp.android" />
+        <package android:name="com.pandora.android" />
+        <package android:name="com.clearchannel.iheartradio.controller" />
+        <package android:name="tunein.player" />
+        <package android:name="com.iloen.melon" />
+        <package android:name="com.ktmusic.geniemusic" />
+        <package android:name="com.neowiz.android.bugs" />
+        <package android:name="skplanet.musicmate" />
+        <package android:name="com.naver.vibe" />
+        <package android:name="com.skysoft.kkbox.android" />
+        <package android:name="com.audiomack" />
+        <package android:name="com.anghami" />
+        <package android:name="com.jio.media.jiobeats" />
         <intent>
             <action android:name="com.virtualdap.runtime.GUEST_RUNTIME" />
         </intent>
