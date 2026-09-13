@@ -18,8 +18,12 @@ music app → guest AudioFlinger → VirtualDAP primary HAL
 The guest policy offers a normal mixed route for mainstream services and direct PCM profiles for
 hi-res players. Compressed offload is intentionally absent so an app cannot bypass capture. The
 host rebuilds `AudioTrack` on a format epoch, applies backpressure with blocking writes, monitors
-disconnects/drops, enumerates real audio routes, and distinguishes Android direct support from a
-mixer path. It never labels an unverified output as bit-perfect.
+disconnects/drops, enumerates real audio routes, and tries the exact source PCM first. If the host
+or selected route rejects that format, a stateful compatibility converter negotiates float/16-bit,
+supported sample rates and stereo downmix in that order. The UI distinguishes unchanged PCM,
+software conversion, Android direct support and a mixer path; it never labels an unverified output
+as bit-perfect. Reported queue latency is derived from submitted frames minus the live AudioTrack
+playback head.
 
 ## Supported music applications
 

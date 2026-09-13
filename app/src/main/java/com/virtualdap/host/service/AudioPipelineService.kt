@@ -35,11 +35,11 @@ class AudioPipelineService : Service(), BridgeEvents {
     private lateinit var sink: AndroidAudioSink
     private var bridge: LocalSocketBridgeServer? = null
     private var currentFormat: PcmFormat? = null
+    private var configuredSourceFormat: PcmFormat? = null
     private var serviceStarted = false
     private val selfTestRunning = AtomicBoolean(false)
     private var receivedBytes = 0L
     private var receivedFrames = 0L
-    private var startedAtNanos = 0L
 
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshRoutes()
@@ -94,6 +94,7 @@ class AudioPipelineService : Service(), BridgeEvents {
         bridge = null
         sink.close()
         currentFormat = null
+        configuredSourceFormat = null
         PipelineStore.update {
             it.copy(
                 enabled = false,
@@ -103,6 +104,7 @@ class AudioPipelineService : Service(), BridgeEvents {
                 sourceFormat = null,
                 sinkFormat = null,
                 directPlayback = false,
+                sourcePreserved = true,
             )
         }
         PipelineStore.log("Audio pipeline stopped")
@@ -123,7 +125,6 @@ class AudioPipelineService : Service(), BridgeEvents {
     }
 
     override fun onGuestConnected(peer: android.net.Credentials, handshake: BridgeHandshake) {
-        startedAtNanos = System.nanoTime()
         receivedBytes = 0
         receivedFrames = 0
         currentFormat = handshake.format
@@ -150,18 +151,16 @@ class AudioPipelineService : Service(), BridgeEvents {
     override fun onPcm(pcm: ByteArray, sequence: Long) {
         val format = currentFormat ?: return
         try {
-            if (PipelineStore.state.value.sinkFormat != format) configureSink(format)
+            if (configuredSourceFormat != format) configureSink(format)
             val written = sink.write(pcm)
             receivedBytes += written
             receivedFrames += written / format.frameSizeBytes
-            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000.0
-            val audioMs = receivedFrames * 1_000.0 / format.sampleRate
             PipelineStore.update {
                 it.copy(
                     phase = PipelinePhase.PLAYING,
                     bytesReceived = receivedBytes,
                     framesReceived = receivedFrames,
-                    latencyMs = (elapsedMs - audioMs).coerceAtLeast(0.0),
+                    latencyMs = sink.queuedDurationMs(),
                 )
             }
         } catch (error: Exception) {
@@ -179,6 +178,7 @@ class AudioPipelineService : Service(), BridgeEvents {
     override fun onGuestDisconnected(reason: String?) {
         sink.close()
         currentFormat = null
+        configuredSourceFormat = null
         PipelineStore.update {
             it.copy(
                 guestConnected = false,
@@ -191,6 +191,7 @@ class AudioPipelineService : Service(), BridgeEvents {
                 sourceFormat = null,
                 sinkFormat = null,
                 directPlayback = false,
+                sourcePreserved = true,
             )
         }
         PipelineStore.log(
@@ -202,17 +203,22 @@ class AudioPipelineService : Service(), BridgeEvents {
     private fun configureSink(format: PcmFormat) {
         try {
             val result = sink.configure(format)
+            configuredSourceFormat = format
             PipelineStore.update {
                 it.copy(
                     sinkFormat = result.configured,
                     activeRoute = result.route,
                     directPlayback = result.directPlayback,
+                    sourcePreserved = result.sourcePreserved,
                     lastError = null,
                 )
             }
             PipelineStore.log(
-                "Output ready: ${result.route?.name ?: "system default"} · " +
-                    if (result.directPlayback) "direct" else "Android mixer",
+                "Output ready: ${result.route?.name ?: "system default"} · " + when {
+                    !result.sourcePreserved -> "converted to ${result.configured.shortLabel()}"
+                    result.directPlayback -> "exact format, direct supported"
+                    else -> "exact AudioTrack format, Android mixer"
+                },
             )
             updateNotification("Playing ${format.shortLabel()}")
         } catch (error: Exception) {

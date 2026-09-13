@@ -504,12 +504,17 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             Text(
                 when {
                     snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
-                    snapshot.directPlayback -> "Android reports direct playback support for this exact input format."
-                    else -> "Android mixer path active; the final hardware format cannot be certified bit-perfect."
+                    !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}."
+                    snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
+                    else -> "Source PCM reaches AudioTrack unchanged; the Android mixer may convert the hardware output."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
             )
+        }
+        if (snapshot.sinkFormat != null) {
+            Spacer(Modifier.height(10.dp))
+            DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
         }
     }
 }
