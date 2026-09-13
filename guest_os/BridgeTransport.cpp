@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -12,6 +13,10 @@
 #include <algorithm>
 #include <array>
 #include <utility>
+
+#if defined(__linux__)
+#include <linux/vm_sockets.h>
+#endif
 
 namespace virtualdap {
 namespace {
@@ -28,7 +33,53 @@ int64_t monotonic_time_ns() {
 
 }  // namespace
 
-BridgeTransport::BridgeTransport(std::string socket_name) : socket_name_(std::move(socket_name)) {}
+bool parse_vsock_endpoint(const std::string& endpoint, uint32_t* cid, uint32_t* port) {
+    constexpr char kPrefix[] = "vsock:";
+    if (cid == nullptr || port == nullptr || endpoint.rfind(kPrefix, 0) != 0) return false;
+    const size_t separator = endpoint.find(':', sizeof(kPrefix) - 1);
+    if (separator == std::string::npos || separator + 1 >= endpoint.size()) return false;
+    const std::string cid_text = endpoint.substr(sizeof(kPrefix) - 1, separator - (sizeof(kPrefix) - 1));
+    const std::string port_text = endpoint.substr(separator + 1);
+    if (cid_text.empty() || port_text.empty() ||
+        cid_text.find_first_not_of("0123456789") != std::string::npos ||
+        port_text.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+    }
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long parsed_cid = strtoul(cid_text.c_str(), &end, 10);
+    if (errno != 0 || end == nullptr || *end != '\0' || parsed_cid > UINT32_MAX) return false;
+    errno = 0;
+    const unsigned long parsed_port = strtoul(port_text.c_str(), &end, 10);
+    if (errno != 0 || end == nullptr || *end != '\0' || parsed_port == 0 ||
+        parsed_port > UINT32_MAX) {
+        return false;
+    }
+    *cid = static_cast<uint32_t>(parsed_cid);
+    *port = static_cast<uint32_t>(parsed_port);
+    return true;
+}
+
+bool parse_bridge_token(const std::string& token_hex, std::array<uint8_t, 32>* token) {
+    if (token == nullptr || token_hex.size() != token->size() * 2) return false;
+    auto nibble = [](char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+        if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+        return -1;
+    };
+    for (size_t index = 0; index < token->size(); ++index) {
+        const int high = nibble(token_hex[index * 2]);
+        const int low = nibble(token_hex[index * 2 + 1]);
+        if (high < 0 || low < 0) return false;
+        (*token)[index] = static_cast<uint8_t>((high << 4) | low);
+    }
+    return true;
+}
+
+BridgeTransport::BridgeTransport(std::string endpoint, std::string bridge_token_hex)
+    : endpoint_(std::move(endpoint)),
+      has_bridge_token_(parse_bridge_token(bridge_token_hex, &bridge_token_)) {}
 
 BridgeTransport::~BridgeTransport() { disconnect(); }
 
@@ -102,22 +153,39 @@ bool BridgeTransport::connect_locked(const PcmConfig& config) {
     const int64_t now = monotonic_time_ns();
     if (now - last_connect_attempt_ns_ < kReconnectIntervalNs) return false;
     last_connect_attempt_ns_ = now;
-    if (socket_name_.empty() || socket_name_.size() >= sizeof(sockaddr_un::sun_path)) return false;
+    if (endpoint_.empty()) return false;
+    uint32_t vsock_cid = 0;
+    uint32_t vsock_port = 0;
+    const bool use_vsock = parse_vsock_endpoint(endpoint_, &vsock_cid, &vsock_port);
+    if (!use_vsock && endpoint_.size() >= sizeof(sockaddr_un::sun_path)) return false;
+    if (use_vsock && !has_bridge_token_) return false;
 
-    const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    const int fd = socket(use_vsock ? AF_VSOCK : AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return false;
     const int send_buffer = kSocketBufferBytes;
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof(send_buffer));
     const timeval timeout{0, kSendTimeoutMicros};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    address.sun_path[0] = '\0';
-    memcpy(address.sun_path + 1, socket_name_.data(), socket_name_.size());
-    const socklen_t address_size = static_cast<socklen_t>(
-        offsetof(sockaddr_un, sun_path) + 1 + socket_name_.size());
-    if (connect(fd, reinterpret_cast<const sockaddr*>(&address), address_size) != 0) {
+    int connect_result = -1;
+    if (use_vsock) {
+#if defined(__linux__)
+        sockaddr_vm address{};
+        address.svm_family = AF_VSOCK;
+        address.svm_cid = vsock_cid;
+        address.svm_port = vsock_port;
+        connect_result = connect(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+#endif
+    } else {
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        address.sun_path[0] = '\0';
+        memcpy(address.sun_path + 1, endpoint_.data(), endpoint_.size());
+        const socklen_t address_size = static_cast<socklen_t>(
+            offsetof(sockaddr_un, sun_path) + 1 + endpoint_.size());
+        connect_result = connect(fd, reinterpret_cast<const sockaddr*>(&address), address_size);
+    }
+    if (connect_result != 0) {
         close(fd);
         return false;
     }
@@ -125,6 +193,10 @@ bool BridgeTransport::connect_locked(const PcmConfig& config) {
     socket_fd_ = fd;
     has_config_ = false;
     ++reconnect_count_;
+    if (use_vsock && !send_all_locked(bridge_token_.data(), bridge_token_.size())) {
+        disconnect_locked();
+        return false;
+    }
     if (!send_handshake_locked(config)) {
         disconnect_locked();
         return false;

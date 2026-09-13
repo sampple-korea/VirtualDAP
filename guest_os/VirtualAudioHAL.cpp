@@ -36,7 +36,8 @@ constexpr uint32_t kDirectFlag = 1u;
 struct virtual_stream_out;
 
 struct virtual_audio_device {
-    explicit virtual_audio_device(const char* socket_name) : transport(socket_name) {}
+    virtual_audio_device(const char* endpoint, const char* bridge_token)
+        : transport(endpoint, bridge_token) {}
 
     audio_hw_device device{};
     std::mutex mutex;
@@ -464,8 +465,10 @@ int device_open(const hw_module_t* module, const char* name, hw_device_t** outpu
     }
 
     char socket_name[PROPERTY_VALUE_MAX]{};
+    char bridge_token[PROPERTY_VALUE_MAX]{};
     property_get("ro.vendor.virtualdap.socket_name", socket_name, virtualdap::kDefaultSocketName);
-    auto* virtual_device = new (std::nothrow) virtual_audio_device(socket_name);
+    property_get("ro.boot.virtualdap.bridge_token", bridge_token, "");
+    auto* virtual_device = new (std::nothrow) virtual_audio_device(socket_name, bridge_token);
     if (virtual_device == nullptr) return -ENOMEM;
 
     virtual_device->device.common.tag = HARDWARE_DEVICE_TAG;
@@ -495,7 +498,7 @@ int device_open(const hw_module_t* module, const char* name, hw_device_t** outpu
     virtual_device->device.set_audio_port_config = device_set_audio_port_config;
 
     *output_device = &virtual_device->device.common;
-    ALOGI("VirtualDAP audio HAL opened; bridge=@%s", socket_name);
+    ALOGI("VirtualDAP audio HAL opened; bridge=%s", socket_name);
     return 0;
 }
 

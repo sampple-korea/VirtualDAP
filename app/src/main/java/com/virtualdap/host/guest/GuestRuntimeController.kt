@@ -18,6 +18,7 @@ import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.runtime.IGuestRuntimeCallback
 import com.virtualdap.runtime.IGuestRuntimeService
 import java.io.File
+import java.security.SecureRandom
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,9 +51,10 @@ data class GuestRuntimeSnapshot(
 object GuestRuntimeController {
     const val ACTION_RUNTIME = "com.virtualdap.runtime.GUEST_RUNTIME"
     const val BIND_PERMISSION = "com.virtualdap.host.permission.BIND_GUEST_RUNTIME"
-    const val PROTOCOL_VERSION = 2
+    const val PROTOCOL_VERSION = 3
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // A single lane preserves MotionEvent/key ordering across Binder while keeping work off the UI.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val mutableState = MutableStateFlow(GuestRuntimeSnapshot())
     val state: StateFlow<GuestRuntimeSnapshot> = mutableState.asStateFlow()
 
@@ -60,6 +62,7 @@ object GuestRuntimeController {
     private lateinit var appContext: Context
     private lateinit var installationRoot: File
     private var runtime: IGuestRuntimeService? = null
+    @Volatile private var providerUid: Int? = null
     private var connection: ServiceConnection? = null
     private val installer = GuestBundleInstaller()
 
@@ -167,7 +170,8 @@ object GuestRuntimeController {
                 val image = installer.installedImage(installationRoot)
                 val descriptor = ParcelFileDescriptor.open(image, ParcelFileDescriptor.MODE_READ_ONLY)
                 try {
-                    service.start(descriptor, manifest.asProperties(), callback)
+                    val bridgeToken = ByteArray(BRIDGE_TOKEN_BYTES).also(SecureRandom()::nextBytes)
+                    service.start(descriptor, manifest.asProperties(), bridgeToken, callback)
                 } finally {
                     descriptor.close()
                 }
@@ -188,6 +192,9 @@ object GuestRuntimeController {
             }
         }
     }
+
+    /** UID is exposed only after system-app and platform-signature verification. */
+    fun trustedProviderUid(): Int? = providerUid
 
     fun attachDisplay(surface: Surface, width: Int, height: Int, densityDpi: Int) {
         if (!surface.isValid || width <= 0 || height <= 0 || densityDpi <= 0) return
@@ -236,6 +243,21 @@ object GuestRuntimeController {
         }
     }
 
+    fun tapKey(keyCode: Int) {
+        val service = runtime ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0)
+        val up = KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0)
+        scope.launch {
+            try {
+                service.injectKeyEvent(down)
+                service.injectKeyEvent(up)
+            } catch (error: Exception) {
+                PipelineStore.log("Guest key input failed: ${error.message}", LogLevel.WARNING)
+            }
+        }
+    }
+
     private fun connectProvider() {
         val intent = Intent(ACTION_RUNTIME)
         val candidates = appContext.packageManager.queryIntentServices(intent, 0)
@@ -268,6 +290,7 @@ object GuestRuntimeController {
                         return
                     }
                     runtime = candidate
+                    providerUid = serviceInfo.applicationInfo.uid
                     val phase = when (candidate.state) {
                         RuntimeState.STARTING -> GuestRuntimePhase.STARTING
                         RuntimeState.RUNNING -> GuestRuntimePhase.RUNNING
@@ -295,8 +318,20 @@ object GuestRuntimeController {
 
             override fun onServiceDisconnected(name: ComponentName) {
                 runtime = null
+                providerUid = null
                 mutableState.update {
-                    it.copy(providerAvailable = false, providerName = null, detail = "Platform runtime disconnected")
+                    val wasActive = it.phase in setOf(
+                        GuestRuntimePhase.STARTING,
+                        GuestRuntimePhase.RUNNING,
+                        GuestRuntimePhase.STOPPING,
+                    )
+                    it.copy(
+                        phase = if (wasActive) GuestRuntimePhase.ERROR else it.phase,
+                        providerAvailable = false,
+                        providerName = null,
+                        detail = "Platform runtime disconnected",
+                        lastError = if (wasActive) "Platform runtime disconnected while the guest was active" else it.lastError,
+                    )
                 }
             }
 
@@ -304,9 +339,20 @@ object GuestRuntimeController {
             override fun onNullBinding(name: ComponentName) = onServiceDisconnected(name)
         }
         connection = serviceConnection
-        if (!appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)) {
+        val bound = try {
+            appContext.bindService(
+                intent,
+                serviceConnection,
+                Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT,
+            )
+        } catch (_: SecurityException) {
+            false
+        }
+        if (!bound) {
             connection = null
-            mutableState.update { it.copy(detail = "Platform runtime rejected the connection") }
+            mutableState.update {
+                it.copy(detail = "Platform runtime rejected the connection; a platform-signed host build is required")
+            }
         }
     }
 
@@ -334,4 +380,6 @@ object GuestRuntimeController {
         const val STOPPING = 3
         const val ERROR = 4
     }
+
+    private const val BRIDGE_TOKEN_BYTES = 32
 }

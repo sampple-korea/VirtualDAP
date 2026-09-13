@@ -51,9 +51,14 @@ The device VINTF manifest must publish the core and effects factories:
 </hal>
 ```
 
-The guest and host must share the abstract Unix socket namespace. In a Linux-container backend,
-do not create a separate network namespace, or explicitly proxy `@virtualdap_audio_v1`. The host
-starts listening before guest playback. No filesystem socket permissions are involved.
+For a Linux-container backend, the guest and host share the abstract Unix socket namespace: keep
+`ro.vendor.virtualdap.socket_name=virtualdap_audio_v1` and do not isolate that namespace, or proxy
+`@virtualdap_audio_v1`. For a hardware VM, set
+`ro.vendor.virtualdap.socket_name=vsock:2:45000`; CID 2 is the crosvm host and the platform runtime
+proxies port 45000 into the host app's authenticated abstract socket. The runtime also injects the
+per-start `androidboot.virtualdap.bridge_token`; the HAL sends its decoded 32 bytes before the wire
+handshake and the proxy uses a constant-time comparison before granting access. Both transports are
+blocking, so backpressure reaches AudioFlinger instead of growing an unbounded queue.
 
 ## Music service compatibility
 

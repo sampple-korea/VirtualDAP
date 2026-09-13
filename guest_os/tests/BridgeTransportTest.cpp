@@ -61,6 +61,20 @@ int create_server(const std::string& name) {
 }  // namespace
 
 int main() {
+    uint32_t cid = 0;
+    uint32_t port = 0;
+    CHECK(virtualdap::parse_vsock_endpoint("vsock:2:45000", &cid, &port));
+    CHECK(cid == 2);
+    CHECK(port == 45000);
+    CHECK(!virtualdap::parse_vsock_endpoint("vsock:2:0", &cid, &port));
+    CHECK(!virtualdap::parse_vsock_endpoint("vsock:host:45000", &cid, &port));
+    CHECK(!virtualdap::parse_vsock_endpoint("virtualdap_audio_v1", &cid, &port));
+    std::array<uint8_t, 32> token{};
+    CHECK(virtualdap::parse_bridge_token(std::string(64, 'a'), &token));
+    CHECK(token.front() == 0xaa && token.back() == 0xaa);
+    CHECK(!virtualdap::parse_bridge_token(std::string(63, 'a'), &token));
+    CHECK(!virtualdap::parse_bridge_token(std::string(64, 'x'), &token));
+
     const std::string socket_name = "virtualdap_test_" + std::to_string(getpid());
     const int server = create_server(socket_name);
     std::promise<void> ready;

@@ -58,7 +58,9 @@ See [Android 13 guest integration](docs/GUEST_ANDROID_13.md) for Soong/product c
 the audio integration. The host's Guest screen imports the strict, streamed and hash-verified
 [guest bundle format](docs/GUEST_BUNDLE.md), and connects only to one platform-signed runtime
 provider. Stock third-party app permissions are intentionally not represented as sufficient to
-mount or boot a full Android guest.
+mount or boot a full Android guest. A reference graphical Android Virtualization Framework provider,
+authenticated vsock proxy and product integration boundary are documented in
+[AVF platform runtime](docs/PLATFORM_RUNTIME.md).
 
 ## Wire protocol
 

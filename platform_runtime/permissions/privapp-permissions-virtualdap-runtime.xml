@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<permissions>
+    <privapp-permissions package="com.virtualdap.platformruntime">
+        <permission name="android.permission.MANAGE_VIRTUAL_MACHINE" />
+        <permission name="android.permission.USE_CUSTOM_VIRTUAL_MACHINE" />
+    </privapp-permissions>
+</permissions>

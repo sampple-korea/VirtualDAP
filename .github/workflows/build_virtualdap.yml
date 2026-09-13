@@ -54,10 +54,13 @@ jobs:
         run: scripts/verify_guest.sh
       - name: Verify guest bundle packager
         run: python3 -m py_compile scripts/package_guest_bundle.py
+      - name: Verify AVF runtime contract and vsock proxy
+        run: scripts/verify_platform_runtime.sh
       - name: Package Android 13 guest integration kit
         run: |
           mkdir -p out
-          tar --exclude='guest_os/build-*' -czf out/virtualdap-android13-guest-kit.tar.gz guest_os docs/GUEST_ANDROID_13.md
+          tar --exclude='guest_os/build-*' -czf out/virtualdap-android13-guest-kit.tar.gz \
+            guest_os platform_runtime docs/GUEST_ANDROID_13.md docs/GUEST_BUNDLE.md docs/PLATFORM_RUNTIME.md
       - name: Upload guest integration kit
         uses: actions/upload-artifact@v4
         with:

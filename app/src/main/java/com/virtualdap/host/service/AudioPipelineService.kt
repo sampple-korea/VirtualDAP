@@ -23,6 +23,8 @@ import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.BridgeEvents
 import com.virtualdap.host.bridge.BridgeHandshake
 import com.virtualdap.host.bridge.LocalSocketBridgeServer
+import com.virtualdap.host.bridge.BridgePeerPolicy
+import com.virtualdap.host.guest.GuestRuntimeController
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.PipelinePhase
 import java.util.concurrent.atomic.AtomicBoolean
@@ -79,7 +81,13 @@ class AudioPipelineService : Service(), BridgeEvents {
         }
         if (bridge != null) return
         try {
-            bridge = LocalSocketBridgeServer(this).also { it.start() }
+            bridge = LocalSocketBridgeServer(
+                events = this,
+                peerPolicy = BridgePeerPolicy(
+                    hostUid = android.os.Process.myUid(),
+                    trustedRuntimeUid = GuestRuntimeController::trustedProviderUid,
+                ),
+            ).also { it.start() }
             PipelineStore.update {
                 it.copy(enabled = true, phase = PipelinePhase.WAITING_FOR_GUEST, lastError = null)
             }
@@ -155,12 +163,24 @@ class AudioPipelineService : Service(), BridgeEvents {
             val written = sink.write(pcm)
             receivedBytes += written
             receivedFrames += written / format.frameSizeBytes
+            val actualRoute = sink.routedOutput()
+            val routeChanged = actualRoute != null &&
+                actualRoute.id != PipelineStore.state.value.activeRoute?.id
             PipelineStore.update {
                 it.copy(
                     phase = PipelinePhase.PLAYING,
                     bytesReceived = receivedBytes,
                     framesReceived = receivedFrames,
                     latencyMs = sink.queuedDurationMs(),
+                    activeRoute = actualRoute ?: it.activeRoute,
+                )
+            }
+            if (routeChanged) {
+                val selected = PipelineStore.state.value.selectedRouteId
+                PipelineStore.log(
+                    "AudioTrack routed to ${actualRoute.name}" +
+                        if (selected != null && selected != actualRoute.id) " (different from preferred output)" else "",
+                    if (selected != null && selected != actualRoute.id) LogLevel.WARNING else LogLevel.INFO,
                 )
             }
         } catch (error: Exception) {

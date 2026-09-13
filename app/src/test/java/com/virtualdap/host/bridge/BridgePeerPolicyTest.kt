@@ -20,4 +20,12 @@ class BridgePeerPolicyTest {
         assertFalse(policy.isAllowed(10_654))
         assertFalse(policy.isAllowed(-1))
     }
+
+    @Test
+    fun permitsOnlyTheVerifiedRuntimeApplicationUid() {
+        val runtimePolicy = BridgePeerPolicy(hostUid = 10_321, trustedRuntimeUid = { 10_777 })
+
+        assertTrue(runtimePolicy.isAllowed(10_777))
+        assertFalse(runtimePolicy.isAllowed(10_778))
+    }
 }

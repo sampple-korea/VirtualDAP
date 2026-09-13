@@ -5,6 +5,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
@@ -338,13 +340,26 @@ private fun GuestDisplay() {
                 SurfaceView(viewContext).apply {
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    setOnTouchListener { _, event ->
+                    setOnTouchListener { view, event ->
+                        view.parent?.requestDisallowInterceptTouchEvent(
+                            event.actionMasked != MotionEvent.ACTION_UP &&
+                                event.actionMasked != MotionEvent.ACTION_CANCEL,
+                        )
                         GuestRuntimeController.injectMotionEvent(event)
                         true
                     }
-                    setOnKeyListener { _, _, event ->
-                        GuestRuntimeController.injectKeyEvent(event)
-                        true
+                    setOnKeyListener { _, keyCode, event ->
+                        if (keyCode in setOf(
+                                KeyEvent.KEYCODE_VOLUME_UP,
+                                KeyEvent.KEYCODE_VOLUME_DOWN,
+                                KeyEvent.KEYCODE_VOLUME_MUTE,
+                            )
+                        ) {
+                            false
+                        } else {
+                            GuestRuntimeController.injectKeyEvent(event)
+                            true
+                        }
                     }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
@@ -378,6 +393,17 @@ private fun GuestDisplay() {
             },
             onRelease = { GuestRuntimeController.detachDisplay() },
         )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                onClick = { GuestRuntimeController.tapKey(KeyEvent.KEYCODE_BACK) },
+                modifier = Modifier.weight(1f),
+            ) { Text("Back") }
+            OutlinedButton(
+                onClick = { GuestRuntimeController.tapKey(KeyEvent.KEYCODE_HOME) },
+                modifier = Modifier.weight(1f),
+            ) { Text("Home") }
+        }
         Spacer(Modifier.height(10.dp))
         Text(
             "Touch and hardware-key events are forwarded to the isolated guest. Audio remains on the dedicated PCM bridge.",

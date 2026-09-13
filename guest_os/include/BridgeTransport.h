@@ -4,15 +4,20 @@
 #include <stdint.h>
 
 #include <mutex>
+#include <array>
 #include <string>
 
 #include "VirtualDapProtocol.h"
 
 namespace virtualdap {
 
+bool parse_vsock_endpoint(const std::string& endpoint, uint32_t* cid, uint32_t* port);
+bool parse_bridge_token(const std::string& token_hex, std::array<uint8_t, 32>* token);
+
 class BridgeTransport {
   public:
-    explicit BridgeTransport(std::string socket_name = kDefaultSocketName);
+    explicit BridgeTransport(std::string endpoint = kDefaultSocketName,
+                             std::string bridge_token_hex = "");
     ~BridgeTransport();
 
     BridgeTransport(const BridgeTransport&) = delete;
@@ -36,7 +41,9 @@ class BridgeTransport {
     bool send_all_locked(const void* data, size_t byte_count);
     void disconnect_locked();
 
-    const std::string socket_name_;
+    const std::string endpoint_;
+    std::array<uint8_t, 32> bridge_token_{};
+    bool has_bridge_token_ = false;
     mutable std::mutex mutex_;
     int socket_fd_ = -1;
     PcmConfig current_config_{};

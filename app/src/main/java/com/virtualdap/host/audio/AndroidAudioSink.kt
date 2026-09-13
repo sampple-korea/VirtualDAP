@@ -138,7 +138,7 @@ class AndroidAudioSink(context: Context) : Closeable {
             submittedFrames = 0
             playbackHeadWraps = 0
             lastPlaybackHead = 0
-            val activeRoute = built.routedDevice?.toOutputRoute() ?: preferred?.toOutputRoute()
+            val activeRoute = built.routedDevice?.toOutputRoute()
             return SinkConfiguration(
                 requested = source,
                 configured = target,
@@ -190,6 +190,8 @@ class AndroidAudioSink(context: Context) : Closeable {
         val playedFrames = playbackHeadWraps + raw
         (submittedFrames - playedFrames).coerceAtLeast(0L) * 1_000.0 / format.sampleRate
     }
+
+    fun routedOutput(): OutputRoute? = synchronized(lock) { track?.routedDevice?.toOutputRoute() }
 
     override fun close() = synchronized(lock) { releaseTrack() }
 

@@ -56,7 +56,7 @@ The regular host APK cannot safely mount a full Android disk or create virtual m
 Android. A device integration therefore supplies exactly one platform-signed service for action
 `com.virtualdap.runtime.GUEST_RUNTIME`. The service declares
 `com.virtualdap.host.permission.BIND_GUEST_RUNTIME` and implements protocol version 1 from
-`IGuestRuntimeService.aidl` (protocol version 2).
+`IGuestRuntimeService.aidl` (protocol version 3).
 
 The host verifies that the resolved provider is a system app signed with the same certificate as
 the Android platform. It passes a read-only `ParcelFileDescriptor`, never its private filesystem
@@ -65,3 +65,12 @@ boot, and the guest-side socket or vsock proxy. Runtime states are the integer c
 in `GuestRuntimeController.RuntimeState`. Once running, the host attaches an Android `Surface` and
 forwards cloned `MotionEvent` and `KeyEvent` objects through Binder; the provider must preserve their
 coordinates, pointer IDs and event times when injecting them into the guest compositor/input stack.
+Every start also supplies a fresh 256-bit bridge token. A VM provider places its lowercase hex value
+in the guest kernel parameter `androidboot.virtualdap.bridge_token`, and consumes/compares the first
+32 bytes on vsock port 45000 before it connects the stream to `@virtualdap_audio_v1`. This prevents a
+second local VM from impersonating the selected guest through the trusted proxy.
+
+The provider owns the signature permission `com.virtualdap.host.permission.BIND_GUEST_RUNTIME`.
+Consequently, a product build with this AVF provider must also sign/preload the VirtualDAP host with
+the platform certificate. A normally installed APK remains useful with a shared-kernel provider,
+but cannot acquire control of this privileged VM backend.
