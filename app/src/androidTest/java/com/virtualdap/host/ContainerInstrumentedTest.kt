@@ -76,6 +76,20 @@ class ContainerInstrumentedTest {
                 click("Stop")
                 await("captured track release") { !PipelineStore.state.value.guestConnected }
             }
+            click("Overlap two tracks")
+            await("two independently playing PCM streams") {
+                val audio = PipelineStore.state.value
+                audio.playingStreams == 2 && audio.framesReceived >= 96_000
+            }
+            assertEquals(false, PipelineStore.state.value.bitPerfectActive)
+            click("Stop first track")
+            await("remaining stream survives first release") {
+                PipelineStore.state.value.connectedStreams == 1 && PipelineStore.state.value.playingStreams == 1
+            }
+            val remainingFrames = PipelineStore.state.value.framesReceived
+            await("remaining PCM continues") { PipelineStore.state.value.framesReceived > remainingFrames + 4_800 }
+            click("Stop")
+            await("both overlapping streams released") { PipelineStore.state.value.connectedStreams == 0 }
             ContainerRuntime.stop(FIXTURE)
             await("stop before split update") {
                 ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid == null
@@ -132,9 +146,11 @@ class ContainerInstrumentedTest {
     private fun click(text: String) {
         val ui = InstrumentationRegistry.getInstrumentation().uiAutomation
         await("fixture button '$text'") {
-            ui.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
-                ?.firstOrNull { it.isClickable }
-                ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
+            val candidates = ui.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
+                ?.filter { it.isClickable }.orEmpty()
+            val selected = candidates.firstOrNull { it.text?.toString()?.equals(text, ignoreCase = true) == true }
+                ?: candidates.singleOrNull()
+            selected?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
         }
     }
 

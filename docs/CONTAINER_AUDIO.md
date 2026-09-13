@@ -59,10 +59,20 @@ PCM16 and 96 kHz float. Instrumentation verifies reception at the host output, s
 mute/unity gain, pause/resume and no reported drops. The host C++ test checks exact packet bytes, bounded prebuffering,
 flush discard, volume controls, playback position and worker cleanup.
 
-This does not establish all music-service compatibility. Still required are concurrent-track
-arbitration/crossfade, AudioTrack playback-speed/effect semantics, static AudioTrack, AAudio/OpenSL ES,
-app-specific decoder/DRM/login tests and wider Android API/ABI runtime coverage. The current server
-owns one active stream; another simultaneous producer cannot be assumed mixed or gaplessly switched.
+The receiver now accepts up to 16 independent streams, each with its own output track, format,
+backpressure, controls and playback-head observations. Android mixes overlapping tracks, and the
+host revokes its USB bit-perfect preference while they overlap. The UI shows the most recently
+activated playing stream and the total connected/playing track counts. Idle handshakes time out;
+paused, authenticated tracks can remain connected without occupying another stream's worker.
+
+The fixture verifies two simultaneous 48/96 kHz streams and continued playback of the second after
+the first is released on API 33/36. This establishes concurrent delivery, not gapless or sample-aligned
+crossfade timing across independent hardware tracks. Bit-perfect mode is not automatically reasserted
+mid-track after overlap; a new exact-format track can request it again.
+
+This does not establish all music-service compatibility. Still required are AudioTrack
+playback-speed/effect semantics, static AudioTrack, AAudio/OpenSL ES, app-specific decoder/DRM/login
+tests and wider Android API/ABI runtime coverage.
 DSD framing/filter helpers and USB descriptor negotiation do not yet constitute an integrated
 exclusive USB isochronous driver.
 

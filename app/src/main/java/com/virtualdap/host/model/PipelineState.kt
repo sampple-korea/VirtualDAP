@@ -43,6 +43,8 @@ data class PipelineSnapshot(
     val bitPerfectActive: Boolean = false,
     val applicationGainLeft: Float = 1f,
     val applicationGainRight: Float = 1f,
+    val connectedStreams: Int = 0,
+    val playingStreams: Int = 0,
     val framesReceived: Long = 0,
     val bytesReceived: Long = 0,
     val guestDroppedBytes: Long = 0,

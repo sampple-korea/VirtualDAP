@@ -9,6 +9,8 @@ import com.virtualdap.host.audio.PcmFormat
 import java.io.Closeable
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Semaphore
 
 interface BridgeEvents {
     fun onGuestConnected(peer: Credentials, handshake: BridgeHandshake)
@@ -27,13 +29,16 @@ interface BridgeEvents {
 
 /** Receives guest HAL PCM over the shared-kernel abstract Unix socket namespace. */
 class LocalSocketBridgeServer(
-    private val events: BridgeEvents,
+    private val events: BridgeEvents? = null,
     private val socketName: String = SOCKET_NAME,
     private val peerPolicy: BridgePeerPolicy = BridgePeerPolicy(Process.myUid()),
+    private val eventsFactory: (() -> BridgeEvents)? = null,
 ) : Closeable {
+    init { require((events == null) != (eventsFactory == null)) { "Provide events or a session factory" } }
     private val running = AtomicBoolean(false)
     @Volatile private var server: LocalServerSocket? = null
-    @Volatile private var client: LocalSocket? = null
+    private val clients = ConcurrentHashMap.newKeySet<LocalSocket>()
+    private val slots = Semaphore(if (eventsFactory == null) 1 else 16)
     private var worker: Thread? = null
 
     fun start() {
@@ -55,12 +60,26 @@ class LocalSocketBridgeServer(
                 val accepted = try {
                     listener.accept()
                 } catch (error: IOException) {
-                    if (running.get()) events.onGuestDisconnected(error.message)
+                    if (running.get()) Log.w(TAG, "Audio listener failed", error)
                     break
                 }
-                client = accepted
-                handleClient(accepted)
-                client = null
+                if (!running.get() || !slots.tryAcquire()) {
+                    accepted.close()
+                    continue
+                }
+                clients.add(accepted)
+                if (!running.get()) {
+                    clients.remove(accepted)
+                    accepted.close()
+                    slots.release()
+                    break
+                }
+                Thread({
+                    try { handleClient(accepted) } finally {
+                        clients.remove(accepted)
+                        slots.release()
+                    }
+                }, "VirtualDAP-stream").apply { isDaemon = true; start() }
             }
         } finally {
             try { listener.close() } catch (_: IOException) { }
@@ -70,15 +89,20 @@ class LocalSocketBridgeServer(
 
     private fun handleClient(socket: LocalSocket) {
         var disconnectReason: String? = null
+        var session: BridgeEvents? = null
         try {
             val peer = socket.peerCredentials
             if (!peerPolicy.isAllowed(peer.uid)) {
                 throw BridgeProtocolException("Rejected bridge peer uid ${peer.uid}")
             }
             socket.receiveBufferSize = 64 * 1024
+            socket.soTimeout = 5_000
             val reader = BridgeWireReader(socket.inputStream)
             val output = socket.outputStream
             val handshake = reader.readHandshake()
+            socket.soTimeout = 0 // A paused track may legitimately remain connected indefinitely.
+            val events = eventsFactory?.invoke() ?: requireNotNull(this.events)
+            session = events
             val controlled = handshake.version == BridgeWireProtocol.CONTROLLED_VERSION
             events.onGuestConnected(peer, handshake)
             var currentFormat = handshake.format
@@ -134,13 +158,13 @@ class LocalSocketBridgeServer(
             } catch (_: IOException) {
                 // Already closed.
             }
-            if (running.get()) events.onGuestDisconnected(disconnectReason)
+            session?.onGuestDisconnected(if (running.get()) disconnectReason else "Audio pipeline stopped")
         }
     }
 
     override fun close() {
         if (!running.compareAndSet(true, false)) return
-        try { client?.close() } catch (_: IOException) { }
+        clients.forEach { try { it.close() } catch (_: IOException) { } }
         try { server?.close() } catch (_: IOException) { }
         worker?.interrupt()
         worker = null

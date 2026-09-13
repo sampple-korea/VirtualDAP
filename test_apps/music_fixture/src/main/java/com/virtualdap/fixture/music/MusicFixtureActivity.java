@@ -17,6 +17,7 @@ public final class MusicFixtureActivity extends Activity {
     private volatile boolean playing;
     private Thread audioThread;
     private volatile AudioTrack activeTrack;
+    private volatile boolean stopFirstTrack;
     private TextView status;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -46,6 +47,14 @@ public final class MusicFixtureActivity extends Activity {
         pcmFloat.setText("Play 96 kHz / float");
         pcmFloat.setOnClickListener(view -> play(96000, true));
         content.addView(pcmFloat);
+        Button overlap = new Button(this);
+        overlap.setText("Overlap two tracks");
+        overlap.setOnClickListener(view -> playOverlap());
+        content.addView(overlap);
+        Button stopFirst = new Button(this);
+        stopFirst.setText("Stop first track");
+        stopFirst.setOnClickListener(view -> stopFirstTrack = true);
+        content.addView(stopFirst);
         Button pause = new Button(this);
         pause.setText("Pause");
         pause.setOnClickListener(view -> {
@@ -138,6 +147,67 @@ public final class MusicFixtureActivity extends Activity {
                 if (track != null) track.release();
             }
         }, "VirtualDAP-fixture-PCM");
+        audioThread.start();
+    }
+
+    private static AudioTrack stream(int rate, int encoding, int frameBytes) {
+        AudioTrack track = new AudioTrack.Builder()
+            .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).setEncoding(encoding).build())
+            .setBufferSizeInBytes(Math.max(rate / 10 * frameBytes,
+                AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, encoding)))
+            .setTransferMode(AudioTrack.MODE_STREAM).build();
+        track.setStartThresholdInFrames(rate / 100);
+        return track;
+    }
+
+    private void playOverlap() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        playing = true;
+        stopFirstTrack = false;
+        audioThread = new Thread(() -> {
+            AudioTrack first = null, second = null;
+            try {
+                first = stream(48000, AudioFormat.ENCODING_PCM_16BIT, 4);
+                second = stream(96000, AudioFormat.ENCODING_PCM_FLOAT, 8);
+                activeTrack = first;
+                first.play();
+                second.play();
+                ByteBuffer a = ByteBuffer.allocateDirect(480 * 4);
+                ByteBuffer b = ByteBuffer.allocateDirect(960 * 8);
+                for (int packet = 0; playing && packet < 3000; packet++) {
+                    if (stopFirstTrack && first != null) {
+                        first.release();
+                        first = null;
+                        activeTrack = second;
+                    }
+                    if (first != null) {
+                        a.clear();
+                        while (playing && a.hasRemaining()) {
+                            if (first.write(a, a.remaining(), AudioTrack.WRITE_BLOCKING) <= 0) {
+                                throw new IllegalStateException("First overlapping stream rejected PCM");
+                            }
+                        }
+                    }
+                    b.clear();
+                    while (playing && b.hasRemaining()) {
+                        if (second.write(b, b.remaining(), AudioTrack.WRITE_BLOCKING) <= 0) {
+                            throw new IllegalStateException("Second overlapping stream rejected PCM");
+                        }
+                    }
+                }
+                runOnUiThread(() -> status.setText("Overlap playback finished"));
+            } catch (Exception error) {
+                runOnUiThread(() -> status.setText("OVERLAP ERROR: " + error));
+            } finally {
+                playing = false;
+                activeTrack = null;
+                if (first != null) first.release();
+                if (second != null) second.release();
+            }
+        }, "VirtualDAP-fixture-overlap");
         audioThread.start();
     }
 

@@ -691,6 +691,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             Text(
                 when {
                     snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
+                    snapshot.playingStreams > 1 -> "${snapshot.playingStreams} tracks are playing through the Android mixer. Bit-perfect output is disabled during overlap."
                     snapshot.bitPerfectActive -> "USB bit-perfect: unchanged PCM, with the OS bit-perfect mixer active on the routed DAC."
                     !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}."
                     snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
@@ -704,6 +705,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             Spacer(Modifier.height(10.dp))
             DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
             DiagnosticLine("Application gain", "${(snapshot.applicationGainLeft * 100).toInt()}% / ${(snapshot.applicationGainRight * 100).toInt()}%")
+            DiagnosticLine("Music tracks", "${snapshot.playingStreams} playing / ${snapshot.connectedStreams} connected")
         }
     }
 }

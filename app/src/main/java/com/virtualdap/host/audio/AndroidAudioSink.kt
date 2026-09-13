@@ -43,12 +43,19 @@ class AndroidAudioSink(context: Context) : Closeable {
     private var playing = true
     private var leftGain = 1f
     private var rightGain = 1f
+    private var exclusiveAllowed = true
+
+    fun setExclusiveAllowed(value: Boolean) = synchronized(lock) {
+        exclusiveAllowed = value
+        if (!value) clearMixerPreference()
+    }
 
     @Suppress("DEPRECATION")
     fun setVolume(left: Float, right: Float) = synchronized(lock) {
         require(left.isFinite() && right.isFinite() && left in 0f..1f && right in 0f..1f)
         leftGain = left
         rightGain = right
+        if (left != 1f || right != 1f) clearMixerPreference()
         track?.setStereoVolume(left, right)
     }
 
@@ -147,7 +154,8 @@ class AndroidAudioSink(context: Context) : Closeable {
         )
         if (minimum <= 0) throw AudioSinkException("AudioTrack rejected ${target.shortLabel()} ($minimum)")
         val bufferBytes = maxOf(minimum * 2, target.frameSizeBytes * (target.sampleRate / 25))
-        val bitPerfect = source == target && requestBitPerfectMixer(preferred, attributes, androidFormat)
+        val bitPerfect = source == target && leftGain == 1f && rightGain == 1f &&
+            requestBitPerfectMixer(preferred, attributes, androidFormat)
         val trackBuilder = AudioTrack.Builder()
             .setAudioAttributes(attributes)
             .setAudioFormat(androidFormat)
@@ -217,7 +225,7 @@ class AndroidAudioSink(context: Context) : Closeable {
         attributes: AudioAttributes,
         format: AudioFormat,
     ): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+        if (!exclusiveAllowed || Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
             device == null || device.type !in USB_DEVICE_TYPES
         ) return false
         val supported = audioManager.getSupportedMixerAttributes(device).firstOrNull {
@@ -234,7 +242,7 @@ class AndroidAudioSink(context: Context) : Closeable {
 
     /** Checks both the currently routed device and the OS's current mixer preference. */
     fun bitPerfectActive(): Boolean = synchronized(lock) {
-        if (leftGain != 1f || rightGain != 1f) return@synchronized false
+        if (!exclusiveAllowed || leftGain != 1f || rightGain != 1f) return@synchronized false
         val device = mixerDevice ?: return@synchronized false
         val attributes = mixerAttributes ?: return@synchronized false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||

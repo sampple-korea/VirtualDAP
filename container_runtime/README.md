@@ -54,7 +54,8 @@ It requests no network, microphone or storage permissions.
 ## Not yet verified or complete
 
 Java streaming PCM interception is now implemented; see [its scope and protocol](../docs/CONTAINER_AUDIO.md).
+Independent overlapping tracks, source formats and individual release are exercised on API 33/36.
 Streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
-multi-track behavior and broader split-delivery-format coverage still require implementation and
+sample-aligned gapless transitions and broader split-delivery-format coverage still require implementation and
 validation. A successful app launch alone is not proof of original-format audio capture. The USB clock/
 descriptor and DSD DSP tests likewise do not prove an integrated USB isochronous output driver.
