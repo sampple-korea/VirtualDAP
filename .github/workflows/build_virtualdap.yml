@@ -52,6 +52,8 @@ jobs:
         run: yes | sdkmanager "cmake;3.22.1" "ndk;28.2.13676358"
       - name: Verify transport, ABI builds, HAL and policy
         run: scripts/verify_guest.sh
+      - name: Verify guest bundle packager
+        run: python3 -m py_compile scripts/package_guest_bundle.py
       - name: Package Android 13 guest integration kit
         run: |
           mkdir -p out

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Speaker
@@ -44,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -55,6 +57,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,6 +79,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.virtualdap.host.guest.GuestAttestation
+import com.virtualdap.host.guest.GuestRuntimeController
+import com.virtualdap.host.guest.GuestRuntimePhase
+import com.virtualdap.host.guest.GuestRuntimeSnapshot
+import com.virtualdap.host.guest.GuestServices
 import com.virtualdap.host.model.AppAudioPath
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.MusicAppCatalog
@@ -103,6 +111,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppSection(val label: String, val icon: ImageVector) {
     PLAYER("Player", Icons.Rounded.Headphones),
+    GUEST("Guest", Icons.Rounded.PhoneAndroid),
     APPS("Apps", Icons.Rounded.LibraryMusic),
     DIAGNOSTICS("Diagnostics", Icons.AutoMirrored.Rounded.List),
 }
@@ -111,22 +120,31 @@ private enum class AppSection(val label: String, val icon: ImageVector) {
 private fun VirtualDAPApp() {
     val context = LocalContext.current
     val snapshot by PipelineStore.state.collectAsStateWithLifecycle()
+    val guestSnapshot by GuestRuntimeController.state.collectAsStateWithLifecycle()
     var selectedSection by remember { mutableStateOf(AppSection.PLAYER) }
     var pendingPermissionAction by remember { mutableStateOf(AudioPipelineService.ACTION_START) }
+    var pendingGuestStart by remember { mutableStateOf(false) }
+    val bundlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(GuestRuntimeController::importBundle)
+    }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
         AudioPipelineService.command(context, pendingPermissionAction)
+        if (pendingGuestStart) GuestRuntimeController.start()
+        pendingGuestStart = false
     }
 
-    fun startWithPermission(action: String) {
+    fun startWithPermission(action: String, startGuest: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             pendingPermissionAction = action
+            pendingGuestStart = startGuest
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             AudioPipelineService.command(context, action)
+            if (startGuest) GuestRuntimeController.start()
         }
     }
 
@@ -170,6 +188,12 @@ private fun VirtualDAPApp() {
                         )
                     },
                 )
+                AppSection.GUEST -> GuestScreen(
+                    snapshot = guestSnapshot,
+                    onImport = { bundlePicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    onStart = { startWithPermission(AudioPipelineService.ACTION_START, startGuest = true) },
+                    onStop = GuestRuntimeController::stop,
+                )
                 AppSection.APPS -> AppsScreen()
                 AppSection.DIAGNOSTICS -> DiagnosticsScreen(
                     snapshot = snapshot,
@@ -177,6 +201,121 @@ private fun VirtualDAPApp() {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun GuestScreen(
+    snapshot: GuestRuntimeSnapshot,
+    onImport: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val manifest = snapshot.manifest
+    val busy = snapshot.phase in setOf(
+        GuestRuntimePhase.IMPORTING,
+        GuestRuntimePhase.STARTING,
+        GuestRuntimePhase.STOPPING,
+    )
+    val running = snapshot.phase == GuestRuntimePhase.RUNNING || snapshot.phase == GuestRuntimePhase.STARTING
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            ScreenHeader(
+                eyebrow = "Android 13",
+                title = "Your music guest.",
+                subtitle = "Import a verified VirtualDAP image and run it through a trusted platform backend.",
+            )
+        }
+        item {
+            SectionCard(title = "Guest runtime", icon = Icons.Rounded.PhoneAndroid) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(22.dp), color = Amber, strokeWidth = 2.dp)
+                    } else {
+                        Box(
+                            Modifier.size(10.dp).background(
+                                if (snapshot.phase == GuestRuntimePhase.RUNNING) Mint else Muted,
+                                CircleShape,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(guestPhaseLabel(snapshot.phase), fontWeight = FontWeight.SemiBold)
+                        Text(snapshot.detail ?: "No runtime activity", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                DiagnosticLine("Provider", snapshot.providerName ?: "Not installed")
+                DiagnosticLine("Trust", if (snapshot.providerAvailable) "Platform-signed" else "Unavailable")
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = onImport, enabled = !busy && !running, modifier = Modifier.weight(1f)) {
+                        Text(if (manifest == null) "Import bundle" else "Replace image")
+                    }
+                    Button(
+                        onClick = if (running) onStop else onStart,
+                        enabled = if (running) !busy else manifest != null && snapshot.providerAvailable && !busy,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(
+                            if (running) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(if (running) "Stop guest" else "Start guest")
+                    }
+                }
+            }
+        }
+        if (manifest != null) {
+            item {
+                SectionCard(title = "Installed image", icon = Icons.Rounded.Memory) {
+                    Text(manifest.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    DiagnosticLine("Android", "13 · API ${manifest.androidApi}")
+                    DiagnosticLine("Architecture", manifest.architecture)
+                    DiagnosticLine("Image", humanBytes(manifest.imageBytes))
+                    DiagnosticLine(
+                        "Services",
+                        when (manifest.services) {
+                            GuestServices.AOSP -> "AOSP"
+                            GuestServices.USER_PROVIDED_GMS -> "User-provided GMS"
+                        },
+                    )
+                    DiagnosticLine(
+                        "Attestation",
+                        when (manifest.attestation) {
+                            GuestAttestation.NOT_CERTIFIED -> "Not certified"
+                            GuestAttestation.OEM_CERTIFIED -> "OEM-declared"
+                        },
+                    )
+                    DiagnosticLine("Content check", "SHA-256 verified at import")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        manifest.buildFingerprint,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Muted,
+                    )
+                }
+            }
+        }
+        item {
+            SectionCard(title = "Service integrity", icon = Icons.Rounded.Info) {
+                Text(
+                    "Image hashing detects corruption but does not create Play certification. Google services, Widevine, and hardware attestation must come from a lawfully provisioned OEM image. Identity or key-attestation spoofing is not installed by VirtualDAP.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Muted,
+                )
+            }
+        }
+        snapshot.lastError?.let { error -> item { ErrorCard(error) } }
     }
 }
 
@@ -645,6 +784,16 @@ private fun phaseLabel(phase: PipelinePhase): String = when (phase) {
     PipelinePhase.BUFFERING -> "Buffering"
     PipelinePhase.PLAYING -> "Playing"
     PipelinePhase.ERROR -> "Needs attention"
+}
+
+private fun guestPhaseLabel(phase: GuestRuntimePhase): String = when (phase) {
+    GuestRuntimePhase.NOT_INSTALLED -> "No guest image"
+    GuestRuntimePhase.IMPORTING -> "Verifying and installing"
+    GuestRuntimePhase.READY -> "Ready"
+    GuestRuntimePhase.STARTING -> "Starting"
+    GuestRuntimePhase.RUNNING -> "Running"
+    GuestRuntimePhase.STOPPING -> "Stopping"
+    GuestRuntimePhase.ERROR -> "Needs attention"
 }
 
 private fun humanBytes(bytes: Long): String = when {

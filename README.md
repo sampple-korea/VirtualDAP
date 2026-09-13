@@ -51,7 +51,10 @@ scripts/verify_guest.sh
 ```
 
 See [Android 13 guest integration](docs/GUEST_ANDROID_13.md) for Soong/product configuration and
-the guest image boundary.
+the audio integration. The host's Guest screen imports the strict, streamed and hash-verified
+[guest bundle format](docs/GUEST_BUNDLE.md), and connects only to one platform-signed runtime
+provider. Stock third-party app permissions are intentionally not represented as sufficient to
+mount or boot a full Android guest.
 
 ## Wire protocol
 
