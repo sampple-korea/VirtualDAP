@@ -1,0 +1,3 @@
+[submodule "third_party/dsd2pcm"]
+	path = third_party/dsd2pcm
+	url = https://github.com/clivem/dsd2pcm.git

@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.virtualdap.host"
     compileSdk = 37
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.virtualdap.host"
@@ -34,9 +35,16 @@ android {
         aidl = true
         compose = true
     }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
     // Exercise the exact pure-JVM disk lifecycle used by the privileged AOSP runtime in CI.
     sourceSets.getByName("test").kotlin.directories.add(rootProject.file("platform_runtime/core").path)
     sourceSets.getByName("androidTest").kotlin.directories.add(rootProject.file("platform_runtime/input").path)
+    sourceSets.getByName("main").assets.directories.add(rootProject.file("third_party/notices").path)
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

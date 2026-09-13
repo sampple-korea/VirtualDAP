@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.22)
+project(VirtualDapDsp LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(DSD2PCM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/dsd2pcm")
+add_library(dsd2pcm STATIC "${DSD2PCM_ROOT}/dsd2pcm.c")
+target_include_directories(dsd2pcm PUBLIC "${DSD2PCM_ROOT}")
+set_target_properties(dsd2pcm PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(ANDROID)
+    add_library(virtualdap_dsp SHARED DsdPcmJni.cpp)
+    target_link_libraries(virtualdap_dsp PRIVATE dsd2pcm)
+    target_compile_options(virtualdap_dsp PRIVATE -Wall -Wextra -Werror)
+    target_link_options(virtualdap_dsp PRIVATE "-Wl,-z,max-page-size=16384")
+else()
+    enable_testing()
+    add_executable(dsd_filter_test tests/DsdFilterTest.cpp)
+    target_link_libraries(dsd_filter_test PRIVATE dsd2pcm)
+    target_compile_options(dsd_filter_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME dsd_filter_test COMMAND dsd_filter_test)
+endif()
