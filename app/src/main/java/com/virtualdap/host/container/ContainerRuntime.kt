@@ -261,9 +261,8 @@ object ContainerRuntime {
                     }
                 }
             }
-            require(names.any { it.equals("base.apk", true) || it.contains("base-master", true) }) {
-                "APK bundle has no base APK"
-            }
+            // Base/split identity is checked by the framework manifest parser in the container,
+            // not by trusting a particular filename inside this ZIP.
             return true
         }
     }

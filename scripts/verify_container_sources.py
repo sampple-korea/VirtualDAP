@@ -73,6 +73,17 @@ class PreparedContainerTests(unittest.TestCase):
         package_record = (JAVA / "core/system/pm/BPackage.java").read_text()
         self.assertNotIn("this.signatures = signingDetails.pastSigningCertificates", package_record)
 
+    def test_split_clusters_and_atomic_install_are_used(self):
+        manager = (JAVA / "core/system/pm/BPackageManagerService.java").read_text()
+        self.assertIn("ApkBundle.plan(files)", manager)
+        self.assertIn("parserApk(parseInput.getAbsolutePath())", manager)
+        self.assertNotIn("selectSplitApks(", manager)
+        creator = (JAVA / "core/system/pm/installer/CreatePackageExecutor.java").read_text()
+        self.assertNotIn("deleteDir", creator)
+        copier = (JAVA / "core/system/pm/installer/CopyExecutor.java").read_text()
+        self.assertIn("AtomicPackagePublisher.publish", copier)
+        self.assertNotIn("catch (Throwable ignored)", copier)
+
 
 if __name__ == "__main__":
     unittest.main()

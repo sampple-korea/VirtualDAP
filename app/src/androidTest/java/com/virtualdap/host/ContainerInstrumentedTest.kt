@@ -16,6 +16,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
+import top.niunaijun.blackbox.core.AtomicPackagePublisher
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -25,6 +27,8 @@ class ContainerInstrumentedTest {
     @Test fun fixtureInstallsAndStartsInsideMusicSpace() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        assertTrue("Consumer tests must run as an ordinary app UID", android.os.Process.myUid() >= 10_000)
+        verifyAtomicPublication(context.cacheDir)
         instrumentation.uiAutomation.executeShellCommand(
             "am start -W -n com.virtualdap.host/.MainActivity",
         ).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
@@ -72,6 +76,26 @@ class ContainerInstrumentedTest {
                 click("Stop")
                 await("captured track release") { !PipelineStore.state.value.guestConnected }
             }
+            ContainerRuntime.stop(FIXTURE)
+            await("stop before split update") {
+                ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid == null
+            }
+            val splitSet = File(context.cacheDir, "instrumented-music-split-set.apks")
+            try {
+                instrumentation.context.assets.open("music-fixture.apks").use { input ->
+                    splitSet.outputStream().use { input.copyTo(it) }
+                }
+                ContainerRuntime.install(Uri.fromFile(splitSet))
+                await("feature split installation") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
+                assertEquals(ContainerRuntime.state.value.toString(), null, ContainerRuntime.state.value.lastError)
+                ContainerRuntime.launch(FIXTURE)
+                await("feature split class loading") {
+                    instrumentation.uiAutomation.rootInActiveWindow
+                        ?.findAccessibilityNodeInfosByText("FEATURE SPLIT LOADED")?.isNotEmpty() == true
+                }
+            } finally {
+                splitSet.delete()
+            }
             val corrupted = File(context.cacheDir, "instrumented-invalid-signature.apk")
             try {
                 // Repacking removes the APK signing block; changing classes.dex also invalidates v1.
@@ -111,6 +135,30 @@ class ContainerInstrumentedTest {
             ui.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
                 ?.firstOrNull { it.isClickable }
                 ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
+        }
+    }
+
+    private fun verifyAtomicPublication(cache: File) {
+        val root = java.nio.file.Files.createTempDirectory(cache.toPath(), "atomic-install-test-").toFile()
+        try {
+            val incoming = File(root, "incoming").apply { mkdir() }
+            val installed = File(root, "installed").apply { mkdir() }
+            File(incoming, "marker").writeText("new")
+            File(installed, "marker").writeText("old")
+            AtomicPackagePublisher.publish(incoming, installed)
+            assertEquals("new", File(installed, "marker").readText())
+            assertEquals("old", File(incoming, "marker").readText())
+            assertThrows(java.io.IOException::class.java) {
+                AtomicPackagePublisher.publish(File(root, "missing"), installed)
+            }
+            assertEquals("new", File(installed, "marker").readText())
+            val outside = File(root, "outside").apply { mkdir() }
+            File(outside, "kept").writeText("preserve")
+            java.nio.file.Files.createSymbolicLink(File(incoming, "link").toPath(), outside.toPath())
+            AtomicPackagePublisher.deleteStaging(incoming)
+            assertEquals("preserve", File(outside, "kept").readText())
+        } finally {
+            AtomicPackagePublisher.deleteStaging(root)
         }
     }
 

@@ -30,6 +30,14 @@ public final class MusicFixtureActivity extends Activity {
         identity.setText("MUSIC FIXTURE READY\nPackage: " + getPackageName() + "\nLaunches: " + launches);
         identity.setTextSize(20);
         content.addView(identity);
+        TextView feature = new TextView(this);
+        try {
+            feature.setText((String) Class.forName("com.virtualdap.fixture.feature.FeatureMarker")
+                .getMethod("value").invoke(null));
+        } catch (ReflectiveOperationException absent) {
+            feature.setText("BASE APK ONLY");
+        }
+        content.addView(feature);
         Button pcm16 = new Button(this);
         pcm16.setText("Play 48 kHz / 16-bit");
         pcm16.setOnClickListener(view -> play(48000, false));

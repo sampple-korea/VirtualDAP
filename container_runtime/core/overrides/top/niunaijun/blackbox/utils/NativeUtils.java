@@ -19,6 +19,10 @@ public final class NativeUtils {
     private NativeUtils() {}
 
     public static void copyNativeLib(File apk, File directory) throws Exception {
+        copyNativeLib(apk, directory, null);
+    }
+
+    public static void copyNativeLib(File apk, File directory, String requestedAbi) throws Exception {
         if (!directory.isDirectory() && !directory.mkdirs()) {
             throw new IllegalStateException("Could not create the native library directory");
         }
@@ -36,6 +40,7 @@ public final class NativeUtils {
             String[] abis = Process.is64Bit() ? Build.SUPPORTED_64_BIT_ABIS : Build.SUPPORTED_32_BIT_ABIS;
             String selected = null;
             for (String abi : abis) {
+                if (requestedAbi != null && !requestedAbi.equals(abi)) continue;
                 String prefix = "lib/" + abi + "/";
                 for (ZipEntry entry : nativeEntries) {
                     if (entry.getName().startsWith(prefix)) {

@@ -3,6 +3,7 @@ plugins { id("com.android.application") }
 android {
     namespace = "com.virtualdap.fixture.music"
     compileSdk = 37
+    dynamicFeatures += setOf(":musicFeature")
     defaultConfig {
         applicationId = "com.virtualdap.fixture.music"
         minSdk = 33

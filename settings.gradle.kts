@@ -25,3 +25,5 @@ project(":containerReflection").projectDir = file("container_runtime/reflection"
 project(":containerCompiler").projectDir = file("container_runtime/compiler")
 include(":musicFixture")
 project(":musicFixture").projectDir = file("test_apps/music_fixture")
+include(":musicFeature")
+project(":musicFeature").projectDir = file("test_apps/music_feature")

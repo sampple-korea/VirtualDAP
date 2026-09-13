@@ -1,13 +1,29 @@
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val prepareMusicFixture = tasks.register<Copy>("prepareMusicFixture") {
-    dependsOn(":musicFixture:assembleDebug")
-    from(project(":musicFixture").layout.buildDirectory.file("outputs/apk/debug/musicFixture-debug.apk"))
-    into(layout.buildDirectory.dir("generated/musicFixtureAssets"))
-    rename { "music-fixture.apk" }
+val prepareMusicFixture = tasks.register("prepareMusicFixture") {
+    dependsOn(":musicFixture:assembleDebug", ":musicFeature:assembleDebug")
+    val baseApk = project(":musicFixture").layout.buildDirectory.file("outputs/apk/debug/musicFixture-debug.apk")
+    val featureApk = project(":musicFeature").layout.buildDirectory.file("outputs/apk/debug/musicFeature-debug.apk")
+    val output = layout.buildDirectory.dir("generated/musicFixtureAssets")
+    inputs.files(baseApk, featureApk)
+    outputs.dir(output)
+    doLast {
+        val directory = output.get().asFile.apply { mkdirs() }
+        baseApk.get().asFile.copyTo(directory.resolve("music-fixture.apk"), overwrite = true)
+        ZipOutputStream(directory.resolve("music-fixture.apks").outputStream()).use { zip ->
+            for ((name, file) in listOf("arbitrary-base-name.apk" to baseApk, "decoder-feature.apk" to featureApk)) {
+                zip.putNextEntry(ZipEntry(name))
+                file.get().asFile.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+    }
 }
 
 android {

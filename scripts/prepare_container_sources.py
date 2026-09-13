@@ -189,6 +189,46 @@ def prepare(upstream, dobby, overrides, output):
     manager = package / "core/system/pm/BPackageManagerService.java"
     content = manager.read_text(encoding="utf-8")
     content = replace_once(
+        content, "        List<File> selectedSplits = null;",
+        "        File parseInput = null;\n        String selectedAbi = null;",
+    )
+    begin = content.index("            if (isApksBundle(stagedFile)) {")
+    end = content.index("            PackageInfo packageArchiveInfo =", begin)
+    content = content[:begin] + (
+        "            if (isApksBundle(stagedFile)) {\n"
+        '                extractedDir = new File(BEnvironment.getCacheDir(), "apks_" + UUID.randomUUID());\n'
+        "                BzFileUtils.mkdirs(extractedDir);\n"
+        "                List<File> files = extractApksBundle(stagedFile, extractedDir);\n"
+        "                top.niunaijun.blackbox.utils.SplitApkPlanner.Plan plan =\n"
+        "                    top.niunaijun.blackbox.utils.ApkBundle.plan(files);\n"
+        "                parseInput = top.niunaijun.blackbox.utils.ApkBundle.stage(\n"
+        '                    plan, new File(extractedDir, "selected"));\n'
+        '                apkFile = new File(parseInput, "base.apk");\n'
+        "                selectedAbi = plan.abi;\n"
+        "            } else {\n"
+        "                apkFile = stagedFile;\n"
+        "                parseInput = stagedFile;\n"
+        "                selectedAbi = top.niunaijun.blackbox.utils.ApkBundle.plan(\n"
+        "                    java.util.Collections.singletonList(apkFile)).abi;\n"
+        "            }\n\n"
+    ) + content[end:]
+    content = replace_once(content, "PackageParser.Package aPackage = parserApk(apkFile.getAbsolutePath());",
+                           "PackageParser.Package aPackage = parserApk(parseInput.getAbsolutePath());")
+    begin = content.index("            if (selectedSplits != null && !selectedSplits.isEmpty()) {")
+    end = content.index("            if (option.isFlag(InstallOption.FLAG_SYSTEM)) {", begin)
+    content = content[:begin] + (
+        "            // Cluster parsing preserves real split names, feature components and dependencies.\n"
+        "            aPackage.applicationInfo.splitSourceDirs = aPackage.splitCodePaths;\n"
+        "            aPackage.applicationInfo.splitPublicSourceDirs = aPackage.splitCodePaths;\n"
+        "            aPackage.applicationInfo.splitNames = aPackage.splitNames;\n"
+        "            black.android.content.pm.BRApplicationInfoL.get(aPackage.applicationInfo)\n"
+        "                ._set_primaryCpuAbi(selectedAbi);\n\n"
+    ) + content[end:]
+    # Remove the obsolete filename heuristics entirely, not merely leave a second inactive selector.
+    begin = content.index("    private static File pickBaseApk(")
+    end = content.index("    private static String stripApkExtension(", begin)
+    content = content[:begin] + content[end:]
+    content = replace_once(
         content,
         "            BPackageSettings bPackageSettings = mSettings.getPackageLPw(aPackage.packageName, aPackage, option);",
         "            BPackageSettings existing = mPackages.get(aPackage.packageName);\n"
@@ -212,7 +252,27 @@ def prepare(upstream, dobby, overrides, output):
         '            result.installError("App import failed: " + t.getMessage());\n'
         "        } finally {\n            if (stagedFile != null",
     )
+    content = replace_once(
+        content, "            mComponentResolver.removeAllComponents(bPackageSettings.pkg);",
+        "            if (existing != null) mComponentResolver.removeAllComponents(existing.pkg);",
+    )
     manager.write_text(content, encoding="utf-8")
+    create_user = package / "core/system/pm/installer/CreateUserExecutor.java"
+    content = create_user.read_text(encoding="utf-8")
+    content = replace_once(
+        content, "BzFileUtils.deleteDir(BEnvironment.getDataLibDir(packageName, userId));",
+        "// Installation never removes an existing user's data or library directory.",
+    )
+    create_user.write_text(content, encoding="utf-8")
+    pm_compat = package / "core/system/pm/PackageManagerCompat.java"
+    content = pm_compat.read_text(encoding="utf-8")
+    content = replace_once(
+        content, "BRApplicationInfoL.get(ai)._set_primaryCpuAbi(Build.CPU_ABI);",
+        "if (BRApplicationInfoL.get(ai).primaryCpuAbi() == null) {\n"
+        "                BRApplicationInfoL.get(ai)._set_primaryCpuAbi(Build.SUPPORTED_ABIS[0]);\n"
+        "            }",
+    )
+    pm_compat.write_text(content, encoding="utf-8")
     package_record = package / "core/system/pm/BPackage.java"
     content = package_record.read_text(encoding="utf-8")
     content = replace_once(
