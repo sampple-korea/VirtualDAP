@@ -1,5 +1,6 @@
 package com.virtualdap.host.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -56,6 +57,11 @@ class AndroidAudioSink(context: Context) : Closeable {
             return configuration!!
         }
         releaseTrack()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            (format.encoding == PcmEncoding.PCM_24_PACKED || format.encoding == PcmEncoding.PCM_32)
+        ) {
+            throw AudioSinkException("24/32-bit packed PCM requires Android 12 or newer on the host")
+        }
 
         val androidFormat = AudioFormat.Builder()
             .setSampleRate(format.sampleRate)
@@ -167,6 +173,7 @@ class AndroidAudioSink(context: Context) : Closeable {
         else -> "Audio device"
     }
 
+    @SuppressLint("InlinedApi") // Guarded in configure(); constants are inlined and safe to inspect.
     private fun PcmEncoding.toAndroidEncoding(): Int = when (this) {
         PcmEncoding.PCM_16 -> AudioFormat.ENCODING_PCM_16BIT
         PcmEncoding.PCM_24_PACKED -> AudioFormat.ENCODING_PCM_24BIT_PACKED

@@ -48,7 +48,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +92,6 @@ import com.virtualdap.host.ui.theme.Panel
 import com.virtualdap.host.ui.theme.VirtualDAPTheme
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -385,7 +385,8 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
             onExpandedChange = { if (snapshot.enabled) expanded = !expanded },
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, snapshot.enabled),
+                modifier = Modifier.fillMaxWidth()
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, snapshot.enabled),
                 onClick = { if (snapshot.enabled) expanded = true },
                 color = Color.White.copy(alpha = 0.04f),
                 shape = RoundedCornerShape(14.dp),
@@ -524,6 +525,8 @@ private fun CompatibilityBadge(path: AppAudioPath) {
 
 @Composable
 private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit) {
+    val locale = LocalLocale.current.platformLocale
+    val timeFormatter = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
@@ -568,7 +571,7 @@ private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit
                         if (index > 0) HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
                         Row(Modifier.padding(vertical = 8.dp)) {
                             Text(
-                                SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(entry.timestampMillis)),
+                                timeFormatter.format(Date(entry.timestampMillis)),
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Muted,

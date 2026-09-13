@@ -33,7 +33,7 @@ certification remain controlled by each provider. VirtualDAP does not bypass DRM
 
 ## Build and test the host
 
-Requirements: JDK 17 and Android SDK 35.
+Requirements: JDK 17 and Android SDK 37 (the app still targets API 36 for the current Play policy).
 
 ```shell
 ./gradlew testDebugUnitTest lintDebug assembleDebug
