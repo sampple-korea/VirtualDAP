@@ -39,6 +39,7 @@ data class PipelineSnapshot(
     val availableRoutes: List<OutputRoute> = emptyList(),
     val directPlayback: Boolean = false,
     val sourcePreserved: Boolean = true,
+    val bitPerfectActive: Boolean = false,
     val framesReceived: Long = 0,
     val bytesReceived: Long = 0,
     val guestDroppedBytes: Long = 0,

@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -71,6 +72,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,7 +113,10 @@ import java.util.Date
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent { VirtualDAPTheme { VirtualDAPApp() } }
     }
 }
@@ -128,9 +133,9 @@ private fun VirtualDAPApp() {
     val context = LocalContext.current
     val snapshot by PipelineStore.state.collectAsStateWithLifecycle()
     val guestSnapshot by GuestRuntimeController.state.collectAsStateWithLifecycle()
-    var selectedSection by remember { mutableStateOf(AppSection.PLAYER) }
-    var pendingPermissionAction by remember { mutableStateOf(AudioPipelineService.ACTION_START) }
-    var pendingGuestStart by remember { mutableStateOf(false) }
+    var selectedSection by rememberSaveable { mutableStateOf(AppSection.PLAYER) }
+    var pendingPermissionAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
+    var pendingGuestStart by rememberSaveable { mutableStateOf(false) }
     val bundlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(GuestRuntimeController::importBundle)
     }
@@ -598,6 +603,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             Text(
                 when {
                     snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
+                    snapshot.bitPerfectActive -> "USB bit-perfect: unchanged PCM, with the OS bit-perfect mixer active on the routed DAC."
                     !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}."
                     snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
                     else -> "Source PCM reaches AudioTrack unchanged; the Android mixer may convert the hardware output."

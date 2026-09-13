@@ -25,7 +25,7 @@ cc_library_shared {
 android_app {
     name: "VirtualDapPlatformRuntime",
     manifest: "AndroidManifest.xml",
-    srcs: ["java/**/*.kt"],
+    srcs: ["java/**/*.kt", "core/**/*.kt", "input/**/*.kt"],
     static_libs: [
         "virtualdap-runtime-aidl-java",
         "android.system.virtualizationservice_internal-java",

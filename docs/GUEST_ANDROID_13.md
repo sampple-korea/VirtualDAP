@@ -99,7 +99,9 @@ adb shell chmod 755 /data/local/tmp/bridge_smoke_client
 adb shell /data/local/tmp/bridge_smoke_client
 ```
 
-Start the pipeline in the host app first. A successful run sends two seconds of 48 kHz, 16-bit
-stereo PCM and reports exactly 96,000 frames with zero dropped bytes. The tool connects as root,
-which is one of the deliberately narrow credentials accepted for a root-backed guest runtime; it
-is not packaged into the host APK or Android guest product.
+Start the pipeline in the host app first. A successful run sends half a second each of 48 kHz
+16-bit, 96 kHz packed 24-bit, 192 kHz 32-bit and 44.1 kHz float stereo PCM. It reports exactly
+190,050 source frames with zero dropped bytes, exercising three live format changes as well as the
+initial handshake. The tool connects as root, which is one of the deliberately narrow credentials
+accepted for a root-backed guest runtime; it is not packaged into the host APK or Android guest
+product.

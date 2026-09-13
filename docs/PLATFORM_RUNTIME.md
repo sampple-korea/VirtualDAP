@@ -39,9 +39,17 @@ partition, virtio GPU/input/block/net/vsock kernel drivers, and
 `guest_os/virtualdap_audio.mk`; crosvm speaker output is disabled so decoded PCM cannot bypass the
 VirtualDAP HAL.
 
-The host APK retains the imported verified base. The provider copies it across the Binder FD into
-its private writable disk, calculates SHA-256 again, and reuses that copy only after a complete hash
-check. A changed bundle hash triggers a fresh atomic working copy.
+The host APK retains and rechecks the immutable imported base. On first launch, the provider copies
+it across the Binder FD into a private writable disk and verifies its SHA-256 again. Subsequent
+launches reuse that working disk with its saved apps, logins and downloads. A mutable disk is not
+compared with the base hash: normal guest writes necessarily change it. Its fixed byte count and
+recorded base provenance are checked instead. Android verified boot inside the guest remains
+responsible for signed system partitions.
+
+Each base hash gets a separate disk directory, activated only after a complete verified copy.
+Selecting a different base does not erase the previous guest's data. A truncated disk or a missing
+provenance record produces an error without resetting it. Prior guest disks remain in the runtime's
+private storage; clearing that application's storage explicitly removes them.
 
 ## Runtime behavior
 

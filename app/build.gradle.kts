@@ -34,6 +34,9 @@ android {
         aidl = true
         compose = true
     }
+    // Exercise the exact pure-JVM disk lifecycle used by the privileged AOSP runtime in CI.
+    sourceSets.getByName("test").kotlin.directories.add(rootProject.file("platform_runtime/core").path)
+    sourceSets.getByName("androidTest").kotlin.directories.add(rootProject.file("platform_runtime/input").path)
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -61,6 +64,8 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

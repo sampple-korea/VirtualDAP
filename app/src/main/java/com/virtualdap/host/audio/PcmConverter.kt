@@ -83,6 +83,29 @@ class StreamingPcmConverter(
         return output.toByteArray()
     }
 
+    /** Emits the final interpolation frame(s) only at the end of a stream, never between packets. */
+    fun finish(): ByteArray {
+        if (pending.isEmpty()) return byteArrayOf()
+        val channels = target.channelCount
+        val frames = pending.size / channels
+        val step = source.sampleRate.toDouble() / target.sampleRate
+        val output = ByteArrayOutputStream()
+        while (sourcePosition < frames) {
+            val leftFrame = floor(sourcePosition).toInt()
+            val rightFrame = (leftFrame + 1).coerceAtMost(frames - 1)
+            val fraction = (sourcePosition - leftFrame).toFloat()
+            for (channel in 0 until channels) {
+                val left = pending[leftFrame * channels + channel]
+                val right = pending[rightFrame * channels + channel]
+                writeSample(output, left + (right - left) * fraction)
+            }
+            sourcePosition += step
+        }
+        pending = FloatArray(0)
+        sourcePosition = 0.0
+        return output.toByteArray()
+    }
+
     private fun decodeAndMap(input: ByteArray): FloatArray {
         val frames = input.size / source.frameSizeBytes
         val decoded = FloatArray(source.channelCount)

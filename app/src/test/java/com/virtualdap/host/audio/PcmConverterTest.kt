@@ -74,4 +74,17 @@ class PcmConverterTest {
 
         assertTrue(runCatching { converter.convert(ByteArray(3)) }.exceptionOrNull() is IllegalArgumentException)
     }
+
+    @Test
+    fun finishingResampledStreamEmitsItsTailExactlyOnce() {
+        val source = PcmFormat(48_000, 1, PcmEncoding.PCM_16)
+        val target = PcmFormat(96_000, 1, PcmEncoding.PCM_16)
+        val converter = StreamingPcmConverter(source, target)
+        val body = converter.convert(byteArrayOf(0, 0, 0x10, 0, 0x20, 0))
+        val tail = converter.finish()
+
+        assertEquals(6 * target.frameSizeBytes, body.size + tail.size)
+        assertTrue(tail.isNotEmpty())
+        assertEquals(0, converter.finish().size)
+    }
 }

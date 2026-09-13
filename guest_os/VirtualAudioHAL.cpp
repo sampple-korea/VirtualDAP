@@ -22,6 +22,7 @@
 #include <cutils/properties.h>
 
 #include "include/BridgeTransport.h"
+#include "include/OutputArbiter.h"
 
 namespace {
 
@@ -41,7 +42,7 @@ struct virtual_audio_device {
 
     audio_hw_device device{};
     std::mutex mutex;
-    virtual_stream_out* direct_output = nullptr;
+    virtualdap::OutputArbiter outputs;
     virtualdap::BridgeTransport transport;
     bool mic_muted = false;
 };
@@ -137,7 +138,9 @@ virtual_stream_out* as_output(audio_stream_out* stream) {
 }
 
 uint32_t out_get_sample_rate(const audio_stream* stream) {
-    return as_output(stream)->sample_rate;
+    const auto* output = as_output(stream);
+    std::lock_guard<std::mutex> lock(output->mutex);
+    return output->sample_rate;
 }
 
 int out_set_sample_rate(audio_stream* stream, uint32_t rate) {
@@ -152,6 +155,7 @@ int out_set_sample_rate(audio_stream* stream, uint32_t rate) {
 
 size_t out_get_buffer_size(const audio_stream* stream) {
     const auto* output = as_output(stream);
+    std::lock_guard<std::mutex> lock(output->mutex);
     const size_t frames = std::max<size_t>(output->sample_rate / 100u, 256u);
     return frames * stream_frame_size(output);
 }
@@ -161,7 +165,9 @@ audio_channel_mask_t out_get_channels(const audio_stream* stream) {
 }
 
 audio_format_t out_get_format(const audio_stream* stream) {
-    return as_output(stream)->format;
+    const auto* output = as_output(stream);
+    std::lock_guard<std::mutex> lock(output->mutex);
+    return output->format;
 }
 
 int out_set_format(audio_stream* stream, audio_format_t format) {
@@ -176,17 +182,21 @@ int out_set_format(audio_stream* stream, audio_format_t format) {
 
 int out_standby(audio_stream* stream) {
     auto* output = as_output(stream);
-    {
-        std::lock_guard<std::mutex> lock(output->mutex);
-        output->standby = true;
-        output->next_deadline_ns = 0;
+    std::lock_guard<std::mutex> lock(output->mutex);
+    output->standby = true;
+    output->next_deadline_ns = 0;
+    // The primary mixer and a direct hi-res stream can overlap during route transitions. A
+    // non-selected mixer entering standby must not tear down the direct stream's shared bridge.
+    std::lock_guard<std::mutex> device_lock(output->device->mutex);
+    if (output->device->outputs.standby(output)) {
+        output->device->transport.disconnect();
     }
-    output->device->transport.disconnect();
     return 0;
 }
 
 int out_dump(const audio_stream* stream, int fd) {
     const auto* output = as_output(stream);
+    std::lock_guard<std::mutex> lock(output->mutex);
     dprintf(fd,
             "VirtualDAP output: rate=%u channels=%u format=0x%x direct=%d standby=%d "
             "accepted_frames=%llu\n",
@@ -197,7 +207,9 @@ int out_dump(const audio_stream* stream, int fd) {
 }
 
 audio_devices_t out_get_device(const audio_stream* stream) {
-    return as_output(stream)->devices;
+    const auto* output = as_output(stream);
+    std::lock_guard<std::mutex> lock(output->mutex);
+    return output->devices;
 }
 
 int out_set_device(audio_stream* stream, audio_devices_t device) {
@@ -229,27 +241,26 @@ int out_set_volume(audio_stream_out*, float, float) { return -ENOSYS; }
 
 ssize_t out_write(audio_stream_out* stream, const void* buffer, size_t byte_count) {
     auto* output = as_output(stream);
+    std::lock_guard<std::mutex> stream_lock(output->mutex);
     const size_t frame_size = stream_frame_size(output);
     if (buffer == nullptr || frame_size == 0 || byte_count % frame_size != 0) return -EINVAL;
     const uint64_t frames = byte_count / frame_size;
 
-    std::lock_guard<std::mutex> stream_lock(output->mutex);
     output->standby = false;
-    bool selected = false;
+    bool delivered = false;
     {
         std::lock_guard<std::mutex> device_lock(output->device->mutex);
-        selected = output->device->direct_output == nullptr || output->device->direct_output == output;
+        if (output->device->outputs.select(output)) {
+            // Keep selection and transfer in one critical section so another stream cannot take
+            // ownership between the decision and its PCM packet.
+            delivered = output->device->transport.write(stream_config(output), buffer, byte_count);
+        } else {
+            // A currently writing direct stream owns the bridge. Pace the suppressed mixer.
+            output->device->transport.note_dropped(byte_count);
+        }
     }
-    if (selected) {
-        const bool delivered = output->device->transport.write(
-            stream_config(output), buffer, byte_count);
-        if (!delivered) pace_output(output, frames);
-        else output->next_deadline_ns = 0;
-    } else {
-        // A direct hi-res stream owns the bridge. Guest UI/notification mixer audio is discarded.
-        output->device->transport.note_dropped(byte_count);
-        pace_output(output, frames);
-    }
+    if (!delivered) pace_output(output, frames);
+    else output->next_deadline_ns = 0;
     output->frames_accepted += frames;
     return static_cast<ssize_t>(byte_count);
 }
@@ -395,11 +406,10 @@ int device_open_output_stream(audio_hw_device* device, audio_io_handle_t,
     auto* virtual_device = reinterpret_cast<virtual_audio_device*>(device);
     if ((flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
         std::lock_guard<std::mutex> lock(virtual_device->mutex);
-        if (virtual_device->direct_output != nullptr) {
+        if (!virtual_device->outputs.reserve_direct(output)) {
             delete output;
             return -EBUSY;
         }
-        virtual_device->direct_output = output;
     }
 
     *stream_out = &output->stream;
@@ -415,9 +425,10 @@ void device_close_output_stream(audio_hw_device* device, audio_stream_out* strea
     auto* output = as_output(stream);
     {
         std::lock_guard<std::mutex> lock(virtual_device->mutex);
-        if (virtual_device->direct_output == output) virtual_device->direct_output = nullptr;
+        if (virtual_device->outputs.close(output)) {
+            virtual_device->transport.disconnect();
+        }
     }
-    virtual_device->transport.disconnect();
     delete output;
 }
 

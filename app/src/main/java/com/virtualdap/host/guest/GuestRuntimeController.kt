@@ -55,13 +55,16 @@ object GuestRuntimeController {
 
     // A single lane preserves MotionEvent/key ordering across Binder while keeping work off the UI.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    // AVF's display-service lookup may block while graphics initializes. Keep it off the lane
+    // carrying start/stop and input so the user can still stop a guest with no working display.
+    private val displayScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val mutableState = MutableStateFlow(GuestRuntimeSnapshot())
     val state: StateFlow<GuestRuntimeSnapshot> = mutableState.asStateFlow()
 
     @Volatile private var initialized = false
     private lateinit var appContext: Context
     private lateinit var installationRoot: File
-    private var runtime: IGuestRuntimeService? = null
+    @Volatile private var runtime: IGuestRuntimeService? = null
     @Volatile private var providerUid: Int? = null
     private var connection: ServiceConnection? = null
     private val installer = GuestBundleInstaller()
@@ -109,7 +112,7 @@ object GuestRuntimeController {
 
     fun importBundle(uri: Uri) {
         check(initialized) { "Guest runtime controller is not initialized" }
-        if (mutableState.value.phase in setOf(GuestRuntimePhase.STARTING, GuestRuntimePhase.RUNNING, GuestRuntimePhase.STOPPING)) {
+        if (mutableState.value.phase in setOf(GuestRuntimePhase.IMPORTING, GuestRuntimePhase.STARTING, GuestRuntimePhase.RUNNING, GuestRuntimePhase.STOPPING)) {
             mutableState.update { it.copy(lastError = "Stop the guest before replacing its image") }
             return
         }
@@ -199,18 +202,23 @@ object GuestRuntimeController {
     fun attachDisplay(surface: Surface, width: Int, height: Int, densityDpi: Int) {
         if (!surface.isValid || width <= 0 || height <= 0 || densityDpi <= 0) return
         val service = runtime ?: return
-        scope.launch {
+        displayScope.launch {
             try {
+                if (!surface.isValid || runtime !== service) return@launch
                 service.attachDisplay(surface, width, height, densityDpi)
             } catch (error: Exception) {
-                runtimeFailed("Could not attach guest display: ${error.message}")
+                val message = "Could not attach guest display: ${error.message}"
+                // A graphics failure does not imply that the VM stopped. Preserve its state and
+                // the Stop control so it cannot become an invisible, uncontrollable running VM.
+                mutableState.update { it.copy(lastError = message) }
+                PipelineStore.log(message, LogLevel.ERROR)
             }
         }
     }
 
     fun detachDisplay() {
         val service = runtime ?: return
-        scope.launch {
+        displayScope.launch {
             runCatching { service.detachDisplay() }.onFailure { error ->
                 PipelineStore.log("Could not detach guest display: ${error.message}", LogLevel.WARNING)
             }

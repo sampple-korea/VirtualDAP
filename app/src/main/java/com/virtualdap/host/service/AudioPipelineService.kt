@@ -38,10 +38,11 @@ class AudioPipelineService : Service(), BridgeEvents {
     private var bridge: LocalSocketBridgeServer? = null
     @Volatile private var currentFormat: PcmFormat? = null
     @Volatile private var configuredSourceFormat: PcmFormat? = null
-    private var serviceStarted = false
+    @Volatile private var serviceStarted = false
     private val selfTestRunning = AtomicBoolean(false)
     private var receivedBytes = 0L
     private var receivedFrames = 0L
+    private var lastMixerCheckMs = 0L
 
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshRoutes()
@@ -113,6 +114,7 @@ class AudioPipelineService : Service(), BridgeEvents {
                 sinkFormat = null,
                 directPlayback = false,
                 sourcePreserved = true,
+                bitPerfectActive = false,
             )
         }
         PipelineStore.log("Audio pipeline stopped")
@@ -129,7 +131,14 @@ class AudioPipelineService : Service(), BridgeEvents {
         PipelineStore.update { it.copy(selectedRouteId = selected) }
         val name = sink.routes().firstOrNull { it.id == selected }?.name ?: "system default"
         PipelineStore.log("Selected output: $name")
-        currentFormat?.let { configureSink(it) }
+        currentFormat?.let { format ->
+            try {
+                configureSink(format)
+            } catch (_: OutputNegotiationException) {
+                // configureSink already published the actionable error. Route selection occurs on
+                // the service main thread, so the failure must not escape into Android's looper.
+            }
+        }
     }
 
     override fun onGuestConnected(peer: android.net.Credentials, handshake: BridgeHandshake) {
@@ -166,6 +175,11 @@ class AudioPipelineService : Service(), BridgeEvents {
             val actualRoute = sink.routedOutput()
             val routeChanged = actualRoute != null &&
                 actualRoute.id != PipelineStore.state.value.activeRoute?.id
+            val now = android.os.SystemClock.elapsedRealtime()
+            val bitPerfect = if (routeChanged || now - lastMixerCheckMs >= 500) {
+                lastMixerCheckMs = now
+                sink.bitPerfectActive()
+            } else PipelineStore.state.value.bitPerfectActive
             PipelineStore.update {
                 it.copy(
                     phase = PipelinePhase.PLAYING,
@@ -173,6 +187,7 @@ class AudioPipelineService : Service(), BridgeEvents {
                     framesReceived = receivedFrames,
                     latencyMs = sink.queuedDurationMs(),
                     activeRoute = actualRoute ?: it.activeRoute,
+                    bitPerfectActive = bitPerfect,
                 )
             }
             if (routeChanged) {
@@ -184,7 +199,9 @@ class AudioPipelineService : Service(), BridgeEvents {
                 )
             }
         } catch (error: Exception) {
-            fail("Playback failed at packet $sequence: ${error.message}")
+            if (error !is OutputNegotiationException) {
+                fail("Playback failed at packet $sequence: ${error.message}")
+            }
             throw error
         }
     }
@@ -196,7 +213,11 @@ class AudioPipelineService : Service(), BridgeEvents {
     }
 
     override fun onGuestDisconnected(reason: String?) {
-        sink.close()
+        try {
+            if (reason == null) sink.finish() else sink.close()
+        } catch (error: Exception) {
+            fail("Could not finish guest audio: ${error.message}")
+        }
         currentFormat = null
         configuredSourceFormat = null
         PipelineStore.update {
@@ -212,12 +233,19 @@ class AudioPipelineService : Service(), BridgeEvents {
                 sinkFormat = null,
                 directPlayback = false,
                 sourcePreserved = true,
+                bitPerfectActive = false,
+                latencyMs = null,
             )
         }
         PipelineStore.log(
             reason?.let { "Guest disconnected: $it" } ?: "Guest disconnected",
             if (reason == null) LogLevel.INFO else LogLevel.WARNING,
         )
+        updateNotification(if (PipelineStore.state.value.lastError == null) {
+            "Waiting for guest audio"
+        } else {
+            "Audio pipeline error"
+        })
     }
 
     private fun configureSink(format: PcmFormat) {
@@ -230,11 +258,13 @@ class AudioPipelineService : Service(), BridgeEvents {
                     activeRoute = result.route,
                     directPlayback = result.directPlayback,
                     sourcePreserved = result.sourcePreserved,
+                    bitPerfectActive = false,
                     lastError = null,
                 )
             }
             PipelineStore.log(
                 "Output ready: ${result.route?.name ?: "system default"} · " + when {
+                    result.bitPerfectRequested -> "USB bit-perfect mixer requested"
                     !result.sourcePreserved -> "converted to ${result.configured.shortLabel()}"
                     result.directPlayback -> "exact format, direct supported"
                     else -> "exact AudioTrack format, Android mixer"
@@ -242,7 +272,13 @@ class AudioPipelineService : Service(), BridgeEvents {
             )
             updateNotification("Playing ${format.shortLabel()}")
         } catch (error: Exception) {
-            fail("Output negotiation failed: ${error.message}")
+            configuredSourceFormat = null
+            val failure = OutputNegotiationException(
+                "Output negotiation failed: ${error.message ?: error.javaClass.simpleName}",
+                error,
+            )
+            fail(failure.message ?: "Output negotiation failed")
+            throw failure
         }
     }
 
@@ -255,13 +291,31 @@ class AudioPipelineService : Service(), BridgeEvents {
         if (!serviceStarted) startPipeline()
         thread(name = "VirtualDAP-self-test") {
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
+            val testSink = AndroidAudioSink(this)
             try {
-                configureSink(format)
+                testSink.selectRoute(PipelineStore.state.value.selectedRouteId)
+                val configured = testSink.configure(format)
+                PipelineStore.update {
+                    if (it.guestConnected) it else it.copy(phase = PipelinePhase.WAITING_FOR_GUEST, lastError = null)
+                }
+                PipelineStore.log(
+                    "Self-test output: ${configured.route?.name ?: "system default"} · " +
+                        if (configured.sourcePreserved) {
+                            "${configured.configured.shortLabel()} unchanged"
+                        } else {
+                            "converted to ${configured.configured.shortLabel()}"
+                        },
+                )
                 PipelineStore.log("Output self-test started (440 Hz, 2 seconds)")
+                updateNotification("Testing host output")
                 val framesPerChunk = 480
                 val chunk = ByteArray(framesPerChunk * format.frameSizeBytes)
                 var frameIndex = 0
                 repeat(200) {
+                    if (!serviceStarted || PipelineStore.state.value.guestConnected) {
+                        PipelineStore.log("Output self-test stopped because the audio pipeline changed", LogLevel.WARNING)
+                        return@thread
+                    }
                     for (frame in 0 until framesPerChunk) {
                         val sample = (sin(2.0 * PI * 440.0 * frameIndex / format.sampleRate) * 4_000).toInt()
                         val base = frame * 4
@@ -271,13 +325,20 @@ class AudioPipelineService : Service(), BridgeEvents {
                         chunk[base + 3] = (sample shr 8).toByte()
                         frameIndex++
                     }
-                    sink.write(chunk)
+                    testSink.write(chunk)
                 }
+                testSink.finish()
                 PipelineStore.log("Output self-test completed")
+                PipelineStore.update {
+                    if (it.guestConnected) it else it.copy(phase = PipelinePhase.WAITING_FOR_GUEST, lastError = null)
+                }
             } catch (error: Exception) {
                 fail("Output self-test failed: ${error.message}")
             } finally {
-                if (!PipelineStore.state.value.guestConnected) sink.close()
+                testSink.close()
+                if (serviceStarted && !PipelineStore.state.value.guestConnected) {
+                    updateNotification("Waiting for guest audio")
+                }
                 selfTestRunning.set(false)
             }
         }
@@ -366,4 +427,7 @@ class AudioPipelineService : Service(), BridgeEvents {
             }
         }
     }
+
+    private class OutputNegotiationException(message: String, cause: Throwable) :
+        IllegalStateException(message, cause)
 }

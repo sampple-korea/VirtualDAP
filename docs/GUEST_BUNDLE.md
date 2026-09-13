@@ -55,8 +55,8 @@ scripts/package_guest_bundle.py \
 The regular host APK cannot safely mount a full Android disk or create virtual machines on stock
 Android. A device integration therefore supplies exactly one platform-signed service for action
 `com.virtualdap.runtime.GUEST_RUNTIME`. The service declares
-`com.virtualdap.host.permission.BIND_GUEST_RUNTIME` and implements protocol version 1 from
-`IGuestRuntimeService.aidl` (protocol version 3).
+`com.virtualdap.host.permission.BIND_GUEST_RUNTIME` and implements protocol version 3 from
+`IGuestRuntimeService.aidl`.
 
 The host verifies that the resolved provider is a system app signed with the same certificate as
 the Android platform. It passes a read-only `ParcelFileDescriptor`, never its private filesystem
