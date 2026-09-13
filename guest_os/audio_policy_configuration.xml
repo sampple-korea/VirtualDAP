@@ -7,7 +7,7 @@
 <audioPolicyConfiguration version="1.0" xmlns:xi="http://www.w3.org/2001/XInclude">
     <globalConfiguration speaker_drc_enabled="false"/>
     <modules>
-        <module name="primary" halVersion="3.0">
+        <module name="primary" halVersion="7.1">
             <attachedDevices>
                 <item>VirtualDAP Sink</item>
             </attachedDevices>
