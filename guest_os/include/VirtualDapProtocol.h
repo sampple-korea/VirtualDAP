@@ -9,9 +9,11 @@ namespace virtualdap {
 constexpr uint32_t kMagic = 0x56444150u;
 constexpr uint32_t kAckMagic = 0x56444141u;
 constexpr uint16_t kProtocolVersion = 2u;
+constexpr uint16_t kControlledProtocolVersion = 3u;
 constexpr uint16_t kHandshakeBytes = 32u;
 constexpr uint16_t kMessageHeaderBytes = 16u;
 constexpr uint16_t kAckBytes = 16u;
+constexpr uint16_t kPositionAckBytes = 32u;
 constexpr uint32_t kMaximumPayloadBytes = 1024u * 1024u;
 constexpr const char* kDefaultSocketName = "virtualdap_audio_v1";
 
@@ -27,6 +29,14 @@ enum class MessageType : uint16_t {
     kFormat = 2,
     kStats = 3,
     kPing = 4,
+    kControl = 5,
+    kVolume = 6,
+};
+
+enum class PlaybackControl : uint32_t { kPlay = 1, kPause = 2, kFlush = 3, kStop = 4, kVolume = 5 };
+struct PlaybackPosition {
+    uint64_t source_frames = 0;
+    uint64_t monotonic_ns = 0;
 };
 
 struct PcmConfig {

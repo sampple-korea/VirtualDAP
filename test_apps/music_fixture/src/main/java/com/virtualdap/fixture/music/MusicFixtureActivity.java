@@ -16,6 +16,7 @@ import java.nio.ByteOrder;
 public final class MusicFixtureActivity extends Activity {
     private volatile boolean playing;
     private Thread audioThread;
+    private volatile AudioTrack activeTrack;
     private TextView status;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -37,9 +38,35 @@ public final class MusicFixtureActivity extends Activity {
         pcmFloat.setText("Play 96 kHz / float");
         pcmFloat.setOnClickListener(view -> play(96000, true));
         content.addView(pcmFloat);
+        Button pause = new Button(this);
+        pause.setText("Pause");
+        pause.setOnClickListener(view -> {
+            AudioTrack current = activeTrack;
+            if (current != null) current.pause();
+        });
+        content.addView(pause);
+        Button resume = new Button(this);
+        resume.setText("Resume");
+        resume.setOnClickListener(view -> {
+            AudioTrack current = activeTrack;
+            if (current != null) current.play();
+        });
+        content.addView(resume);
+        Button mute = new Button(this);
+        mute.setText("Mute");
+        mute.setOnClickListener(view -> { if (activeTrack != null) activeTrack.setVolume(0f); });
+        content.addView(mute);
+        Button unity = new Button(this);
+        unity.setText("Unity gain");
+        unity.setOnClickListener(view -> { if (activeTrack != null) activeTrack.setVolume(1f); });
+        content.addView(unity);
         Button stop = new Button(this);
         stop.setText("Stop");
-        stop.setOnClickListener(view -> playing = false);
+        stop.setOnClickListener(view -> {
+            playing = false;
+            AudioTrack current = activeTrack;
+            if (current != null) current.stop();
+        });
         content.addView(stop);
         status = new TextView(this);
         status.setText("Idle");
@@ -67,7 +94,7 @@ public final class MusicFixtureActivity extends Activity {
                         .setEncoding(encoding).build())
                     .setBufferSizeInBytes(bufferBytes).setTransferMode(AudioTrack.MODE_STREAM).build();
                 track.setStartThresholdInFrames(sampleRate / 100);
-                track.play();
+                activeTrack = track;
                 long frames = 0;
                 int chunkFrames = sampleRate / 100;
                 ByteBuffer samples = ByteBuffer.allocateDirect(chunkFrames * frameBytes).order(ByteOrder.LITTLE_ENDIAN);
@@ -85,9 +112,12 @@ public final class MusicFixtureActivity extends Activity {
                         int written = track.write(samples, samples.remaining(), AudioTrack.WRITE_BLOCKING);
                         if (written <= 0) throw new IllegalStateException("AudioTrack write: " + written);
                     }
+                    // Common decoder behavior: prebuffer a packet before calling play().
+                    if (frames == 0 && playing) track.play();
                     frames += chunkFrames;
                     if (frames % sampleRate == 0) {
-                        String update = "Submitted " + frames + " frames at " + sampleRate + " Hz";
+                        String update = "Submitted " + frames + " frames at " + sampleRate +
+                            " Hz; output head " + Integer.toUnsignedLong(track.getPlaybackHeadPosition());
                         runOnUiThread(() -> status.setText(update));
                     }
                 }
@@ -96,6 +126,7 @@ public final class MusicFixtureActivity extends Activity {
                 runOnUiThread(() -> status.setText("PLAYBACK ERROR: " + error));
             } finally {
                 playing = false;
+                activeTrack = null;
                 if (track != null) track.release();
             }
         }, "VirtualDAP-fixture-PCM");
@@ -104,6 +135,8 @@ public final class MusicFixtureActivity extends Activity {
 
     @Override public void onDestroy() {
         playing = false;
+        AudioTrack current = activeTrack;
+        if (current != null) current.stop();
         super.onDestroy();
     }
 }

@@ -27,4 +27,13 @@ else()
     target_include_directories(output_arbiter_test PRIVATE include)
     target_compile_options(output_arbiter_test PRIVATE -Wall -Wextra -Werror)
     add_test(NAME output_arbiter_test COMMAND output_arbiter_test)
+    set(CAPTURE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../container_runtime")
+    add_executable(captured_pcm_stream_test
+        "${CAPTURE_ROOT}/tests/CapturedPcmStreamTest.cpp"
+        "${CAPTURE_ROOT}/core/src/main/cpp/CapturedPcmStream.cpp")
+    target_include_directories(captured_pcm_stream_test PRIVATE "${CAPTURE_ROOT}/core/src/main/cpp")
+    target_link_libraries(captured_pcm_stream_test PRIVATE virtualdap_bridge Threads::Threads)
+    target_compile_options(captured_pcm_stream_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME captured_pcm_stream_test COMMAND captured_pcm_stream_test)
+    set_tests_properties(captured_pcm_stream_test PROPERTIES TIMEOUT 15)
 endif()

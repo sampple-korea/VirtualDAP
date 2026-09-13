@@ -11,6 +11,51 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class BridgeWireProtocolTest {
+    @Test fun volumeRejectsNanInfinityAndOutOfRangeGains() {
+        fun packet(left: Float, right: Float) = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
+            .putShort(6).putShort(0).putInt(8).putLong(22).putFloat(left).putFloat(right).array()
+        assertEquals(
+            BridgeMessage.Volume(0.25f, 1f, 22),
+            BridgeWireReader(ByteArrayInputStream(packet(0.25f, 1f))).readMessage(),
+        )
+        for (invalid in listOf(Float.NaN, Float.POSITIVE_INFINITY, -0.1f, 1.1f)) {
+            assertThrows(BridgeProtocolException::class.java) {
+                BridgeWireReader(ByteArrayInputStream(packet(invalid, 1f))).readMessage()
+            }
+            assertThrows(BridgeProtocolException::class.java) {
+                BridgeWireReader(ByteArrayInputStream(packet(1f, invalid))).readMessage()
+            }
+        }
+    }
+
+    @Test fun controlledAckContainsTheSourcePlaybackObservation() {
+        val output = ByteArrayOutputStream()
+        BridgeWireWriter.writeAck(output, 19, BridgePosition(441, 123456789L))
+        val data = ByteBuffer.wrap(output.toByteArray()).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(BridgeWireProtocol.POSITION_ACK_BYTES, output.size())
+        assertEquals(BridgeWireProtocol.ACK_MAGIC, data.int)
+        assertEquals(BridgeWireProtocol.CONTROLLED_VERSION, data.short)
+        assertEquals(0, data.short.toInt())
+        assertEquals(19, data.long)
+        assertEquals(441, data.long)
+        assertEquals(123456789L, data.long)
+    }
+
+    @Test fun controlCommandsAreStrictAndBounded() {
+        fun packet(value: Int, size: Int = 4) = ByteBuffer.allocate(16 + size)
+            .order(ByteOrder.LITTLE_ENDIAN).putShort(5).putShort(0)
+            .putInt(size).putLong(4).apply { if (size >= 4) putInt(value) }.array()
+        for (command in BridgeControl.entries) {
+            val parsed = BridgeWireReader(ByteArrayInputStream(packet(command.wireId))).readMessage()
+            assertEquals(BridgeMessage.Control(command, 4), parsed)
+        }
+        for (invalid in listOf(packet(0), packet(5), packet(1, 0), packet(1, 8))) {
+            assertThrows(BridgeProtocolException::class.java) {
+                BridgeWireReader(ByteArrayInputStream(invalid)).readMessage()
+            }
+        }
+    }
+
     @Test
     fun writesSubmissionAcknowledgementInLittleEndian() {
         val output = ByteArrayOutputStream()

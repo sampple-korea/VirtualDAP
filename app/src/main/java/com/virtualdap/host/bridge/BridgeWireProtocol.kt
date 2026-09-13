@@ -11,9 +11,11 @@ import java.nio.ByteOrder
 object BridgeWireProtocol {
     const val MAGIC = 0x56444150
     const val VERSION: Short = 2
+    const val CONTROLLED_VERSION: Short = 3
     const val HANDSHAKE_BYTES = 32
     const val MESSAGE_HEADER_BYTES = 16
     const val ACK_BYTES = 16
+    const val POSITION_ACK_BYTES = 32
     const val ACK_MAGIC = 0x56444141
     const val MAX_PAYLOAD_BYTES = 1024 * 1024
 
@@ -21,15 +23,29 @@ object BridgeWireProtocol {
     const val TYPE_FORMAT = 2
     const val TYPE_STATS = 3
     const val TYPE_PING = 4
+    const val TYPE_CONTROL = 5
+    const val TYPE_VOLUME = 6
 }
 
+enum class BridgeControl(val wireId: Int) { PLAY(1), PAUSE(2), FLUSH(3), STOP(4) }
+
+/** Source-frame playback-head observation; not a claim of hardware/DAC presentation timing. */
+data class BridgePosition(val sourceFrames: Long, val monotonicNs: Long)
+
 object BridgeWireWriter {
-    fun writeAck(output: OutputStream, sequence: Long) {
-        val data = ByteBuffer.allocate(BridgeWireProtocol.ACK_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+    fun writeAck(output: OutputStream, sequence: Long, position: BridgePosition? = null) {
+        val data = ByteBuffer.allocate(
+            if (position == null) BridgeWireProtocol.ACK_BYTES else BridgeWireProtocol.POSITION_ACK_BYTES,
+        ).order(ByteOrder.LITTLE_ENDIAN)
         data.putInt(BridgeWireProtocol.ACK_MAGIC)
-        data.putShort(BridgeWireProtocol.VERSION)
+        data.putShort(if (position == null) BridgeWireProtocol.VERSION else BridgeWireProtocol.CONTROLLED_VERSION)
         data.putShort(0)
         data.putLong(sequence)
+        if (position != null) {
+            require(position.sourceFrames >= 0 && position.monotonicNs >= 0)
+            data.putLong(position.sourceFrames)
+            data.putLong(position.monotonicNs)
+        }
         output.write(data.array())
         output.flush()
     }
@@ -40,6 +56,7 @@ data class BridgeHandshake(
     val frameSize: Int,
     val flags: Int,
     val streamEpoch: Long,
+    val version: Short = BridgeWireProtocol.VERSION,
 )
 
 sealed interface BridgeMessage {
@@ -54,6 +71,8 @@ sealed interface BridgeMessage {
         override val sequence: Long,
     ) : BridgeMessage
     data class Ping(override val sequence: Long) : BridgeMessage
+    data class Control(val command: BridgeControl, override val sequence: Long) : BridgeMessage
+    data class Volume(val left: Float, val right: Float, override val sequence: Long) : BridgeMessage
 }
 
 class BridgeWireReader(private val input: InputStream) {
@@ -65,7 +84,7 @@ class BridgeWireReader(private val input: InputStream) {
             throw BridgeProtocolException("Invalid socket bridge magic: 0x${magic.toUInt().toString(16)}")
         }
         val version = data.short
-        if (version != BridgeWireProtocol.VERSION) {
+        if (version != BridgeWireProtocol.VERSION && version != BridgeWireProtocol.CONTROLLED_VERSION) {
             throw BridgeProtocolException("Unsupported socket bridge version: $version")
         }
         val headerSize = data.short.toInt() and 0xffff
@@ -79,7 +98,7 @@ class BridgeWireReader(private val input: InputStream) {
         if (frameSize != format.frameSizeBytes) {
             throw BridgeProtocolException("Frame size $frameSize does not match ${format.frameSizeBytes}")
         }
-        return BridgeHandshake(format, frameSize, flags, epoch)
+        return BridgeHandshake(format, frameSize, flags, epoch, version)
     }
 
     /** Returns null only when the peer closes cleanly between messages. */
@@ -108,6 +127,22 @@ class BridgeWireReader(private val input: InputStream) {
             BridgeWireProtocol.TYPE_PING -> {
                 if (payloadSize != 0) throw BridgeProtocolException("Ping must have an empty payload")
                 BridgeMessage.Ping(sequence)
+            }
+            BridgeWireProtocol.TYPE_CONTROL -> {
+                if (payloadSize != 4) throw BridgeProtocolException("Control payload must be four bytes")
+                val value = data.int
+                val command = BridgeControl.entries.firstOrNull { it.wireId == value }
+                    ?: throw BridgeProtocolException("Unknown playback control: $value")
+                BridgeMessage.Control(command, sequence)
+            }
+            BridgeWireProtocol.TYPE_VOLUME -> {
+                if (payloadSize != 8) throw BridgeProtocolException("Volume payload must be eight bytes")
+                val left = data.float
+                val right = data.float
+                if (!left.isFinite() || !right.isFinite() || left !in 0f..1f || right !in 0f..1f) {
+                    throw BridgeProtocolException("Invalid volume gain")
+                }
+                BridgeMessage.Volume(left, right, sequence)
             }
             else -> throw BridgeProtocolException("Unknown bridge message type: $type")
         }

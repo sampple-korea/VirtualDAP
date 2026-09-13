@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <utility>
 
 #if defined(__linux__)
@@ -88,8 +89,10 @@ bool parse_bridge_token(const std::string& token_hex, std::array<uint8_t, 32>* t
     return true;
 }
 
-BridgeTransport::BridgeTransport(std::string endpoint, std::string bridge_token_hex)
+BridgeTransport::BridgeTransport(std::string endpoint, std::string bridge_token_hex,
+                                 uint16_t protocol_version)
     : endpoint_(std::move(endpoint)),
+      protocol_version_(protocol_version),
       has_bridge_token_(parse_bridge_token(bridge_token_hex, &bridge_token_)) {}
 
 BridgeTransport::~BridgeTransport() { disconnect(); }
@@ -140,6 +143,59 @@ bool BridgeTransport::write(const PcmConfig& config, const void* pcm, size_t byt
     return true;
 }
 
+bool BridgeTransport::control(const PcmConfig& config, PlaybackControl command) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (protocol_version_ != kControlledProtocolVersion) return false;
+    if (command == PlaybackControl::kVolume) return false;
+    if (socket_fd_ < 0 && !connect_locked(config)) return false;
+    std::array<uint8_t, 4> payload{};
+    put_u32_le(payload.data(), static_cast<uint32_t>(command));
+    const uint64_t sequence = ++sequence_;
+    if (!send_message_locked(MessageType::kControl, payload.data(), payload.size(), sequence) ||
+        !receive_ack_locked(sequence)) {
+        disconnect_locked();
+        return false;
+    }
+    return true;
+}
+
+bool BridgeTransport::set_volume(const PcmConfig& config, float left, float right) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (protocol_version_ != kControlledProtocolVersion ||
+        !std::isfinite(left) || !std::isfinite(right) || left < 0 || left > 1 || right < 0 || right > 1) return false;
+    if (socket_fd_ < 0 && !connect_locked(config)) return false;
+    uint32_t left_bits, right_bits;
+    memcpy(&left_bits, &left, sizeof(left));
+    memcpy(&right_bits, &right, sizeof(right));
+    std::array<uint8_t, 8> payload{};
+    put_u32_le(payload.data(), left_bits);
+    put_u32_le(payload.data() + 4, right_bits);
+    const uint64_t sequence = ++sequence_;
+    if (!send_message_locked(MessageType::kVolume, payload.data(), payload.size(), sequence) ||
+        !receive_ack_locked(sequence)) {
+        disconnect_locked();
+        return false;
+    }
+    return true;
+}
+
+bool BridgeTransport::query_position() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (protocol_version_ != kControlledProtocolVersion || socket_fd_ < 0) return false;
+    const uint64_t sequence = ++sequence_;
+    if (!send_message_locked(MessageType::kPing, nullptr, 0, sequence) ||
+        !receive_ack_locked(sequence)) {
+        disconnect_locked();
+        return false;
+    }
+    return true;
+}
+
+PlaybackPosition BridgeTransport::position() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return position_;
+}
+
 void BridgeTransport::note_dropped(size_t byte_count) {
     std::lock_guard<std::mutex> lock(mutex_);
     dropped_bytes_ += byte_count;
@@ -166,6 +222,7 @@ uint64_t BridgeTransport::reconnect_count() const {
 }
 
 bool BridgeTransport::connect_locked(const PcmConfig& config) {
+    if (protocol_version_ != kProtocolVersion && protocol_version_ != kControlledProtocolVersion) return false;
     const int64_t now = monotonic_time_ns();
     if (now - last_connect_attempt_ns_ < kReconnectIntervalNs) return false;
     last_connect_attempt_ns_ = now;
@@ -182,7 +239,9 @@ bool BridgeTransport::connect_locked(const PcmConfig& config) {
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof(send_buffer));
     const timeval timeout{0, kSendTimeoutMicros};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    const timeval receive_timeout{static_cast<time_t>(kReceiveTimeoutMicros / 1000000),
+    const timeval receive_timeout{static_cast<time_t>(
+                                      protocol_version_ == kControlledProtocolVersion ? 5 :
+                                      kReceiveTimeoutMicros / 1000000),
                                   static_cast<suseconds_t>(kReceiveTimeoutMicros % 1000000)};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
 
@@ -228,6 +287,7 @@ bool BridgeTransport::connect_locked(const PcmConfig& config) {
 bool BridgeTransport::send_handshake_locked(const PcmConfig& config) {
     std::array<uint8_t, kHandshakeBytes> handshake{};
     encode_handshake(handshake.data(), config);
+    put_u16_le(handshake.data() + 4, protocol_version_);
     return send_all_locked(handshake.data(), handshake.size());
 }
 
@@ -237,7 +297,9 @@ bool BridgeTransport::send_format_locked(const PcmConfig& config) {
     put_u16_le(payload.data() + 4, config.channel_count);
     put_u16_le(payload.data() + 6, static_cast<uint16_t>(config.encoding));
     put_u64_le(payload.data() + 8, config.stream_epoch);
-    return send_message_locked(MessageType::kFormat, payload.data(), payload.size(), ++sequence_);
+    const uint64_t sequence = ++sequence_;
+    return send_message_locked(MessageType::kFormat, payload.data(), payload.size(), sequence) &&
+        (protocol_version_ != kControlledProtocolVersion || receive_ack_locked(sequence));
 }
 
 bool BridgeTransport::send_stats_locked() {
@@ -245,7 +307,9 @@ bool BridgeTransport::send_stats_locked() {
     put_u64_le(payload.data(), frames_written_);
     put_u64_le(payload.data() + 8, dropped_bytes_);
     put_u64_le(payload.data() + 16, reconnect_count_);
-    return send_message_locked(MessageType::kStats, payload.data(), payload.size(), ++sequence_);
+    const uint64_t sequence = ++sequence_;
+    return send_message_locked(MessageType::kStats, payload.data(), payload.size(), sequence) &&
+        (protocol_version_ != kControlledProtocolVersion || receive_ack_locked(sequence));
 }
 
 bool BridgeTransport::send_message_locked(MessageType type, const void* payload,
@@ -272,12 +336,18 @@ bool BridgeTransport::send_all_locked(const void* data, size_t byte_count) {
 }
 
 bool BridgeTransport::receive_ack_locked(uint64_t expected_sequence) {
-    std::array<uint8_t, kAckBytes> ack{};
-    if (!receive_all_locked(ack.data(), ack.size())) return false;
-    return get_u32_le(ack.data()) == kAckMagic &&
+    std::array<uint8_t, kPositionAckBytes> ack{};
+    const size_t size = protocol_version_ == kControlledProtocolVersion ? kPositionAckBytes : kAckBytes;
+    if (!receive_all_locked(ack.data(), size)) return false;
+    const bool valid = get_u32_le(ack.data()) == kAckMagic &&
            static_cast<uint16_t>(ack[4] | (static_cast<uint16_t>(ack[5]) << 8u)) ==
-               kProtocolVersion &&
+               protocol_version_ &&
            ack[6] == 0 && ack[7] == 0 && get_u64_le(ack.data() + 8) == expected_sequence;
+    if (valid && protocol_version_ == kControlledProtocolVersion) {
+        position_ = {get_u64_le(ack.data() + 16), get_u64_le(ack.data() + 24)};
+        if (position_.source_frames > INT64_MAX || position_.monotonic_ns > INT64_MAX) return false;
+    }
+    return valid;
 }
 
 bool BridgeTransport::receive_all_locked(void* data, size_t byte_count) {

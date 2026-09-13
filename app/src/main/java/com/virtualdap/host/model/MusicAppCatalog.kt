@@ -9,34 +9,41 @@ data class SupportedMusicApp(
     val note: String,
 )
 
-/** Apps using Android's AudioTrack path are captured globally by the guest audio HAL. */
+/** Compatibility targets, not a list of services whose login/DRM/playback has been certified. */
 object MusicAppCatalog {
+    private fun target(name: String, packageName: String, path: AppAudioPath = AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS) =
+        SupportedMusicApp(name, packageName, path, when (path) {
+            AppAudioPath.LOCAL_HI_RES_PCM -> "Not yet verified. Select Android/AudioTrack output; the host owns USB output."
+            AppAudioPath.SYSTEM_PCM -> "Not yet verified. Installation and PCM playback need an app-specific test."
+            AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS -> "Not yet verified. Login, regional availability and protected playback remain provider-controlled."
+        })
+
     val popularApps = listOf(
-        SupportedMusicApp("Apple Music", "com.apple.android.music", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Lossless availability depends on the service account and guest DRM certification."),
-        SupportedMusicApp("Spotify", "com.spotify.music", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Standard and high-quality streams use the guest system PCM path."),
-        SupportedMusicApp("YouTube Music", "com.google.android.apps.youtube.music", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Protected playback requires a guest image accepted by Google services."),
-        SupportedMusicApp("TIDAL", "com.aspiro.tidal", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "FLAC playback is captured after application decoding."),
-        SupportedMusicApp("Qobuz", "com.qobuz.music", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Hi-res PCM is preserved when the app opens a matching direct output."),
-        SupportedMusicApp("Amazon Music", "com.amazon.mp3", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "HD playback availability is controlled by Amazon and guest certification."),
-        SupportedMusicApp("Deezer", "deezer.android.app", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("SoundCloud", "com.soundcloud.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("Plexamp", "tv.plex.labs.plexamp", AppAudioPath.SYSTEM_PCM, "System PCM playback is supported."),
-        SupportedMusicApp("Poweramp", "com.maxmpz.audioplayer", AppAudioPath.LOCAL_HI_RES_PCM, "Direct high-resolution PCM is supported; proprietary bypass paths must be disabled."),
-        SupportedMusicApp("Neutron Player", "com.neutroncode.mp", AppAudioPath.LOCAL_HI_RES_PCM, "Direct high-resolution PCM is supported; use the AudioTrack output driver."),
-        SupportedMusicApp("USB Audio Player PRO", "com.extreamsd.usbaudioplayerpro", AppAudioPath.LOCAL_HI_RES_PCM, "Use Android/AudioTrack output inside the guest; direct USB access belongs to the host."),
-        SupportedMusicApp("foobar2000", "com.foobar2000.foobar2000", AppAudioPath.LOCAL_HI_RES_PCM, "System PCM playback is supported."),
-        SupportedMusicApp("Bandcamp", "com.bandcamp.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("Pandora", "com.pandora.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
-        SupportedMusicApp("iHeartRadio", "com.clearchannel.iheartradio.controller", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Live radio and music use the same guest PCM path."),
-        SupportedMusicApp("TuneIn Radio", "tunein.player", AppAudioPath.SYSTEM_PCM, "Live and on-demand playback use the guest system PCM path."),
-        SupportedMusicApp("Melon", "com.iloen.melon", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported; account and device policy remain provider-controlled."),
-        SupportedMusicApp("Genie Music", "com.ktmusic.geniemusic", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("Bugs", "com.neowiz.android.bugs", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("FLO", "skplanet.musicmate", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("NAVER VIBE", "com.naver.vibe", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
-        SupportedMusicApp("KKBOX", "com.skysoft.kkbox.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
-        SupportedMusicApp("Audiomack", "com.audiomack", AppAudioPath.SYSTEM_PCM, "System PCM playback is supported."),
-        SupportedMusicApp("Anghami", "com.anghami", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
-        SupportedMusicApp("JioSaavn", "com.jio.media.jiobeats", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
+        target("Apple Music", "com.apple.android.music"),
+        target("Spotify", "com.spotify.music"),
+        target("YouTube Music", "com.google.android.apps.youtube.music"),
+        target("TIDAL", "com.aspiro.tidal"),
+        target("Qobuz", "com.qobuz.music"),
+        target("Amazon Music", "com.amazon.mp3"),
+        target("Deezer", "deezer.android.app"),
+        target("SoundCloud", "com.soundcloud.android"),
+        target("Plexamp", "tv.plex.labs.plexamp", AppAudioPath.SYSTEM_PCM),
+        target("Poweramp", "com.maxmpz.audioplayer", AppAudioPath.LOCAL_HI_RES_PCM),
+        target("Neutron Player", "com.neutroncode.mp", AppAudioPath.LOCAL_HI_RES_PCM),
+        target("USB Audio Player PRO", "com.extreamsd.usbaudioplayerpro", AppAudioPath.LOCAL_HI_RES_PCM),
+        target("foobar2000", "com.foobar2000.foobar2000", AppAudioPath.LOCAL_HI_RES_PCM),
+        target("Bandcamp", "com.bandcamp.android"),
+        target("Pandora", "com.pandora.android"),
+        target("iHeartRadio", "com.clearchannel.iheartradio.controller"),
+        target("TuneIn Radio", "tunein.player", AppAudioPath.SYSTEM_PCM),
+        target("Melon", "com.iloen.melon"),
+        target("Genie Music", "com.ktmusic.geniemusic"),
+        target("Bugs", "com.neowiz.android.bugs"),
+        target("FLO", "skplanet.musicmate"),
+        target("NAVER VIBE", "com.naver.vibe"),
+        target("KKBOX", "com.skysoft.kkbox.android"),
+        target("Audiomack", "com.audiomack", AppAudioPath.SYSTEM_PCM),
+        target("Anghami", "com.anghami"),
+        target("JioSaavn", "com.jio.media.jiobeats"),
     )
 }

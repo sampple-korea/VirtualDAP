@@ -7,6 +7,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.virtualdap.host.container.ContainerPhase
 import com.virtualdap.host.container.ContainerRuntime
 import com.virtualdap.host.service.AudioPipelineService
+import com.virtualdap.host.service.PipelineStore
+import com.virtualdap.host.audio.PcmEncoding
+import com.virtualdap.host.model.PipelinePhase
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -40,8 +43,45 @@ class ContainerInstrumentedTest {
                     it.packageName == FIXTURE && it.lastStartedPid != null
                 }
             }
+            for ((button, rate, encoding) in listOf(
+                Triple("48 kHz", 48_000, PcmEncoding.PCM_16),
+                Triple("96 kHz", 96_000, PcmEncoding.PCM_FLOAT),
+            )) {
+                click(button)
+                await("captured $rate Hz PCM at the host output") {
+                    val audio = PipelineStore.state.value
+                    audio.guestConnected && audio.sourceFormat?.sampleRate == rate &&
+                        audio.sourceFormat.encoding == encoding && audio.framesReceived >= rate
+                }
+                assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+                click("Mute")
+                await("application mute at host") { PipelineStore.state.value.applicationGainLeft == 0f }
+                assertEquals(false, PipelineStore.state.value.bitPerfectActive)
+                click("Unity gain")
+                await("application unity gain at host") { PipelineStore.state.value.applicationGainLeft == 1f }
+                click("Pause")
+                await("host pause") { PipelineStore.state.value.phase == PipelinePhase.PAUSED }
+                val pausedFrames = PipelineStore.state.value.framesReceived
+                SystemClock.sleep(150)
+                assertEquals("Paused producer must stop submitting PCM", pausedFrames, PipelineStore.state.value.framesReceived)
+                click("Resume")
+                await("host resume") { PipelineStore.state.value.framesReceived > pausedFrames }
+                click("Stop")
+                await("captured track release") { !PipelineStore.state.value.guestConnected }
+            }
         } finally {
             fixture.delete()
+            ContainerRuntime.stop(FIXTURE)
+            AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP)
+        }
+    }
+
+    private fun click(text: String) {
+        val ui = InstrumentationRegistry.getInstrumentation().uiAutomation
+        await("fixture button '$text'") {
+            ui.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
+                ?.firstOrNull { it.isClickable }
+                ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
         }
     }
 

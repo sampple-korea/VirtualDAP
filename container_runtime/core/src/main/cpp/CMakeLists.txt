@@ -15,6 +15,9 @@ list(APPEND dobby_sources "${CMAKE_CURRENT_LIST_DIR}/compat/code_patch_android.c
 set_property(TARGET dobby_static PROPERTY SOURCES "${dobby_sources}")
 
 add_library(blackbox SHARED
+    "${CMAKE_CURRENT_LIST_DIR}/AudioTrackCapture.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/CapturedPcmStream.cpp"
+    "${ROOT}/guest_os/BridgeTransport.cpp"
     "${CORE}/BoxCore.cpp"
     "${CORE}/hidden_api.cpp"
     "${CORE}/IO.cpp"
@@ -36,7 +39,7 @@ add_library(blackbox SHARED
     "${CORE}/xdl/xdl_util.c"
 )
 target_include_directories(blackbox PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/compat" "${CORE}" "${DOBBY_SOURCE}/include")
+    "${CMAKE_CURRENT_LIST_DIR}/compat" "${CORE}" "${DOBBY_SOURCE}/include" "${ROOT}/guest_os/include")
 target_compile_options(blackbox PRIVATE -fvisibility=hidden -ffunction-sections -fdata-sections)
 target_link_options(blackbox PRIVATE "-Wl,--gc-sections" "-Wl,-z,max-page-size=16384")
 target_link_libraries(blackbox PRIVATE dobby_static log android z dl)

@@ -17,7 +17,8 @@ bool parse_bridge_token(const std::string& token_hex, std::array<uint8_t, 32>* t
 class BridgeTransport {
   public:
     explicit BridgeTransport(std::string endpoint = kDefaultSocketName,
-                             std::string bridge_token_hex = "");
+                             std::string bridge_token_hex = "",
+                             uint16_t protocol_version = kProtocolVersion);
     ~BridgeTransport();
 
     BridgeTransport(const BridgeTransport&) = delete;
@@ -26,6 +27,10 @@ class BridgeTransport {
     bool write(const PcmConfig& config, const void* pcm, size_t byte_count);
     void note_dropped(size_t byte_count);
     void disconnect();
+    bool control(const PcmConfig& config, PlaybackControl command);
+    bool query_position();
+    bool set_volume(const PcmConfig& config, float left, float right);
+    PlaybackPosition position() const;
 
     uint64_t frames_written() const;
     uint64_t dropped_bytes() const;
@@ -44,6 +49,8 @@ class BridgeTransport {
     void disconnect_locked();
 
     const std::string endpoint_;
+    const uint16_t protocol_version_;
+    PlaybackPosition position_{};
     std::array<uint8_t, 32> bridge_token_{};
     bool has_bridge_token_ = false;
     mutable std::mutex mutex_;

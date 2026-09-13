@@ -15,8 +15,9 @@ route.
 
 ## Audio bridge
 
-The host socket receiver and output pipeline are implemented and tested. The consumer container's
-decoded-audio interception is still being integrated. The older full-OS reference captures at its
+The host socket receiver, output pipeline and the consumer container's Java streaming AudioTrack
+interception are implemented and tested with a fixture app. See the [capture scope](docs/CONTAINER_AUDIO.md)
+for verified behavior and remaining native/static/concurrent paths. The older full-OS reference captures at its
 Audio HAL boundary; that reference does not make container capture complete.
 
 The existing Android 13 guest HAL reference offers a normal mixed route for mainstream services and direct PCM profiles for
@@ -86,6 +87,6 @@ authenticated vsock proxy and product integration boundary are documented in
 
 The Kotlin and C++ implementations are independently unit/integration tested in CI.
 
-The consumer app now targets Android 13 or later and is integrating the source-built BlackBox
-container. Its installation/lifecycle UI and capture hooks must be validated together before a
+The consumer app now targets Android 13 or later and integrates the source-built BlackBox
+container. Broader app/API compatibility must be validated before a
 consumer-ready release; the legacy HAL/AVF reference path is not a substitute for that validation.

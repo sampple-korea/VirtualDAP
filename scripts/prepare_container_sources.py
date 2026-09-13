@@ -99,6 +99,28 @@ def prepare(upstream, dobby, overrides, output):
         'HookEnv.method_utils_class = static_cast<jclass>(env->NewGlobalRef(\n'
         '        env->FindClass("top/niunaijun/jnihook/MethodUtils")));',
     )
+    content = replace_once(
+        content,
+        "if (env->RegisterNatives(clazz, gMethods, 1) < 0) {\n",
+        "if (env->RegisterNatives(clazz, gMethods, 1) < 0) {\n"
+        "        *orig_fun = nullptr;\n"
+        "        env->ExceptionClear();\n",
+    )
+    content = replace_once(
+        content,
+        "    char *art_method = static_cast<char *>(GetArtMethod(env, clazz, methodId));",
+        "    if (HookEnv.art_method_flags_offset == 0) return;\n"
+        "    jclass reflected_class = env->GetObjectClass(method);\n"
+        '    jmethodID modifiers = env->GetMethodID(reflected_class, "getModifiers", "()I");\n'
+        "    bool is_static = (env->CallIntMethod(method, modifiers) & 0x8) != 0;\n"
+        "    char *art_method = static_cast<char *>(GetArtMethod(env, clazz, methodId, is_static));",
+    )
+    content = replace_once(
+        content,
+        "    char *artField = static_cast<char *>(GetFieldMethod(env, field));",
+        "    if (HookEnv.art_field_flags_offset == 0) return;\n"
+        "    char *artField = static_cast<char *>(GetFieldMethod(env, field));",
+    )
     jni_hook.write_text(content, encoding="utf-8")
     dobby_output = output.parent / "dobby"
     if dobby_output.is_symlink():

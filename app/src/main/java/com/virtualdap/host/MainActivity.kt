@@ -703,6 +703,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
         if (snapshot.sinkFormat != null) {
             Spacer(Modifier.height(10.dp))
             DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
+            DiagnosticLine("Application gain", "${(snapshot.applicationGainLeft * 100).toInt()}% / ${(snapshot.applicationGainRight * 100).toInt()}%")
         }
     }
 }
@@ -804,7 +805,7 @@ private fun AppsScreen() {
             ScreenHeader(
                 eyebrow = "Compatibility",
                 title = "One PCM path.",
-                subtitle = "Every app routed through the guest AudioFlinger reaches the same capture HAL.",
+                subtitle = "Target services for the music space. Catalog entries are not verified compatibility results.",
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -830,7 +831,7 @@ private fun AppsScreen() {
         }
         item {
             Text(
-                "Service login, regional availability, Play Integrity and Widevine level remain controlled by each provider and the guest image. VirtualDAP does not bypass DRM.",
+                "The container shares the host Android version. Service login, Play Integrity and Widevine remain provider-controlled. VirtualDAP does not bypass DRM.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -976,6 +977,7 @@ private fun phaseLabel(phase: PipelinePhase): String = when (phase) {
     PipelinePhase.WAITING_FOR_GUEST -> "Ready for guest"
     PipelinePhase.BUFFERING -> "Buffering"
     PipelinePhase.PLAYING -> "Playing"
+    PipelinePhase.PAUSED -> "Paused"
     PipelinePhase.ERROR -> "Needs attention"
 }
 

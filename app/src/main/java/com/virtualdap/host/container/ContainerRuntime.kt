@@ -66,6 +66,14 @@ object ContainerRuntime {
                 override fun getLogSenderChatId(): String = ""
             })
             core.addAppLifecycleCallback(object : AppLifecycleCallback() {
+                override fun beforeCreateApplication(
+                    packageName: String, processName: String, context: Context, userId: Int,
+                ) {
+                    check(top.niunaijun.blackbox.core.AudioCapture.install()) {
+                        "Audio interception is unavailable on this Android runtime"
+                    }
+                }
+
                 override fun afterApplicationOnCreate(
                     packageName: String,
                     processName: String,

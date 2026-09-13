@@ -7,6 +7,7 @@ enum class PipelinePhase {
     WAITING_FOR_GUEST,
     BUFFERING,
     PLAYING,
+    PAUSED,
     ERROR,
 }
 
@@ -40,6 +41,8 @@ data class PipelineSnapshot(
     val directPlayback: Boolean = false,
     val sourcePreserved: Boolean = true,
     val bitPerfectActive: Boolean = false,
+    val applicationGainLeft: Float = 1f,
+    val applicationGainRight: Float = 1f,
     val framesReceived: Long = 0,
     val bytesReceived: Long = 0,
     val guestDroppedBytes: Long = 0,

@@ -16,6 +16,13 @@ interface BridgeEvents {
     fun onPcm(pcm: ByteArray, sequence: Long)
     fun onGuestStats(framesWritten: Long, droppedBytes: Long, reconnects: Long)
     fun onGuestDisconnected(reason: String?)
+    fun onPlaybackControl(command: BridgeControl) {
+        throw BridgeProtocolException("Playback controls are unavailable")
+    }
+    fun playbackPosition(): BridgePosition = BridgePosition(0, System.nanoTime())
+    fun onVolume(left: Float, right: Float) {
+        throw BridgeProtocolException("Playback volume is unavailable")
+    }
 }
 
 /** Receives guest HAL PCM over the shared-kernel abstract Unix socket namespace. */
@@ -72,6 +79,7 @@ class LocalSocketBridgeServer(
             val reader = BridgeWireReader(socket.inputStream)
             val output = socket.outputStream
             val handshake = reader.readHandshake()
+            val controlled = handshake.version == BridgeWireProtocol.CONTROLLED_VERSION
             events.onGuestConnected(peer, handshake)
             var currentFormat = handshake.format
             var lastSequence = -1L
@@ -91,7 +99,6 @@ class LocalSocketBridgeServer(
                             )
                         }
                         events.onPcm(message.pcm, message.sequence)
-                        BridgeWireWriter.writeAck(output, message.sequence)
                     }
                     is BridgeMessage.Format -> {
                         currentFormat = message.format
@@ -103,6 +110,19 @@ class LocalSocketBridgeServer(
                         message.reconnects,
                     )
                     is BridgeMessage.Ping -> Unit
+                    is BridgeMessage.Control -> {
+                        if (!controlled) throw BridgeProtocolException("Playback control requires protocol 3")
+                        events.onPlaybackControl(message.command)
+                    }
+                    is BridgeMessage.Volume -> {
+                        if (!controlled) throw BridgeProtocolException("Playback volume requires protocol 3")
+                        events.onVolume(message.left, message.right)
+                    }
+                }
+                if (controlled || message is BridgeMessage.Audio) {
+                    BridgeWireWriter.writeAck(
+                        output, message.sequence, if (controlled) events.playbackPosition() else null,
+                    )
                 }
             }
         } catch (error: Exception) {

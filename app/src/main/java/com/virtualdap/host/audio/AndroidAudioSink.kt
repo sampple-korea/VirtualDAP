@@ -40,6 +40,38 @@ class AndroidAudioSink(context: Context) : Closeable {
     private var lastPlaybackHead = 0L
     private var mixerDevice: AudioDeviceInfo? = null
     private var mixerAttributes: AudioAttributes? = null
+    private var playing = true
+    private var leftGain = 1f
+    private var rightGain = 1f
+
+    @Suppress("DEPRECATION")
+    fun setVolume(left: Float, right: Float) = synchronized(lock) {
+        require(left.isFinite() && right.isFinite() && left in 0f..1f && right in 0f..1f)
+        leftGain = left
+        rightGain = right
+        track?.setStereoVolume(left, right)
+    }
+
+    /** Controlled producers send PCM only while playing, so no paused write can hold this lock. */
+    fun setPlaying(value: Boolean) = synchronized(lock) {
+        playing = value
+        track?.let { if (value) it.play() else it.pause() }
+    }
+
+    fun flush() = synchronized(lock) {
+        val active = track ?: return@synchronized
+        val resume = playing
+        active.pause()
+        active.flush()
+        configuration?.let { config ->
+            converter = StreamingPcmConverter(config.requested, config.configured)
+                .takeIf { config.requested != config.configured }
+        }
+        submittedFrames = 0
+        playbackHeadWraps = 0
+        lastPlaybackHead = 0
+        if (resume) active.play()
+    }
 
     fun selectRoute(deviceId: Int?) = synchronized(lock) {
         if (selectedRouteId != deviceId) {
@@ -147,7 +179,9 @@ class AndroidAudioSink(context: Context) : Closeable {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 built.setStartThresholdInFrames(maxOf(1, target.sampleRate / 100))
             }
-            built.play()
+            @Suppress("DEPRECATION")
+            built.setStereoVolume(leftGain, rightGain)
+            if (playing) built.play()
             val direct = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
                     AudioManager.getDirectPlaybackSupport(androidFormat, attributes) !=
@@ -200,6 +234,7 @@ class AndroidAudioSink(context: Context) : Closeable {
 
     /** Checks both the currently routed device and the OS's current mixer preference. */
     fun bitPerfectActive(): Boolean = synchronized(lock) {
+        if (leftGain != 1f || rightGain != 1f) return@synchronized false
         val device = mixerDevice ?: return@synchronized false
         val attributes = mixerAttributes ?: return@synchronized false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
@@ -280,6 +315,8 @@ class AndroidAudioSink(context: Context) : Closeable {
 
     private fun finishTrack() {
         if (track == null) return
+        // A graceful stop drains previously submitted frames even after pause.
+        track?.play()
         converter?.finish()?.takeIf { it.isNotEmpty() }?.let(::writeOutput)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // A short clip can end before the initial fill threshold. Permit its remaining

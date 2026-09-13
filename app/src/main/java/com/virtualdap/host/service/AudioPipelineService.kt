@@ -22,6 +22,9 @@ import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.BridgeEvents
 import com.virtualdap.host.bridge.BridgeHandshake
+import com.virtualdap.host.bridge.BridgeControl
+import com.virtualdap.host.bridge.BridgePosition
+import com.virtualdap.host.bridge.BridgeWireProtocol
 import com.virtualdap.host.bridge.LocalSocketBridgeServer
 import com.virtualdap.host.bridge.BridgePeerPolicy
 import com.virtualdap.host.guest.GuestRuntimeController
@@ -43,6 +46,9 @@ class AudioPipelineService : Service(), BridgeEvents {
     private var receivedBytes = 0L
     private var receivedFrames = 0L
     private var lastMixerCheckMs = 0L
+    private var controlledProducer = false
+    private var producerPlaying = true
+    private var positionBaseFrames = 0L
 
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshRoutes()
@@ -144,6 +150,11 @@ class AudioPipelineService : Service(), BridgeEvents {
     override fun onGuestConnected(peer: android.net.Credentials, handshake: BridgeHandshake) {
         receivedBytes = 0
         receivedFrames = 0
+        positionBaseFrames = 0
+        controlledProducer = handshake.version == BridgeWireProtocol.CONTROLLED_VERSION
+        producerPlaying = !controlledProducer
+        sink.setPlaying(producerPlaying)
+        sink.setVolume(1f, 1f)
         currentFormat = handshake.format
         PipelineStore.update {
             it.copy(
@@ -151,6 +162,8 @@ class AudioPipelineService : Service(), BridgeEvents {
                 guestPeer = "pid ${peer.pid} · uid ${peer.uid}",
                 phase = PipelinePhase.BUFFERING,
                 sourceFormat = handshake.format,
+                applicationGainLeft = 1f,
+                applicationGainRight = 1f,
                 lastError = null,
             )
         }
@@ -166,6 +179,7 @@ class AudioPipelineService : Service(), BridgeEvents {
     }
 
     override fun onPcm(pcm: ByteArray, sequence: Long) {
+        check(producerPlaying) { "Controlled producer sent PCM while paused" }
         val format = currentFormat ?: return
         try {
             if (configuredSourceFormat != format) configureSink(format)
@@ -212,6 +226,52 @@ class AudioPipelineService : Service(), BridgeEvents {
         }
     }
 
+    override fun onPlaybackControl(command: BridgeControl) {
+        check(controlledProducer) { "Not a controlled audio producer" }
+        when (command) {
+            BridgeControl.PLAY -> {
+                producerPlaying = true
+                sink.setPlaying(true)
+                PipelineStore.update { it.copy(phase = PipelinePhase.BUFFERING) }
+            }
+            BridgeControl.PAUSE -> {
+                producerPlaying = false
+                sink.setPlaying(false)
+                PipelineStore.update { it.copy(phase = PipelinePhase.PAUSED) }
+            }
+            BridgeControl.FLUSH -> {
+                sink.flush()
+                positionBaseFrames = receivedFrames
+            }
+            BridgeControl.STOP -> {
+                sink.finish()
+                configuredSourceFormat = null
+                positionBaseFrames = receivedFrames
+                producerPlaying = false
+                sink.setPlaying(false)
+                PipelineStore.update { it.copy(phase = PipelinePhase.BUFFERING) }
+            }
+        }
+        PipelineStore.log("Container playback: ${command.name.lowercase()}")
+    }
+
+    override fun playbackPosition(): BridgePosition {
+        val rate = currentFormat?.sampleRate ?: 48_000
+        val queuedFrames = ((sink.queuedDurationMs() ?: 0.0) * rate / 1_000.0).toLong()
+        return BridgePosition(
+            (receivedFrames - positionBaseFrames - queuedFrames).coerceAtLeast(0),
+            System.nanoTime(),
+        )
+    }
+
+    override fun onVolume(left: Float, right: Float) {
+        sink.setVolume(left, right)
+        PipelineStore.update { it.copy(
+            bitPerfectActive = sink.bitPerfectActive(),
+            applicationGainLeft = left, applicationGainRight = right,
+        ) }
+    }
+
     override fun onGuestDisconnected(reason: String?) {
         try {
             if (reason == null) sink.finish() else sink.close()
@@ -220,6 +280,9 @@ class AudioPipelineService : Service(), BridgeEvents {
         }
         currentFormat = null
         configuredSourceFormat = null
+        controlledProducer = false
+        producerPlaying = true
+        sink.setPlaying(true)
         PipelineStore.update {
             it.copy(
                 guestConnected = false,

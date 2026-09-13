@@ -28,6 +28,8 @@ explicitly routed to the host, whose provider checks the caller UID.
   launches its Application/Activity in a container process, persists its private launch counter and
   reports the actual process startup back to the host. The fixture is not installed in Android's
   system package manager. This is an instrumentation test, not a timer-based UI simulation.
+- The same fixture's 48 kHz PCM16 and 96 kHz float reach the host audio service. Tests cover
+  prebuffering, mute/unity gain, pause/resume, track release and zero reported dropped bytes.
 
 ```sh
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug
@@ -43,7 +45,8 @@ It requests no network, microphone or storage permissions.
 
 ## Not yet verified or complete
 
-Container PCM interception, streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
+Java streaming PCM interception is now implemented; see [its scope and protocol](../docs/CONTAINER_AUDIO.md).
+Streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
 multi-track behavior and full split-APK/feature-module coverage still require implementation and
-validation. A successful app launch is not proof of original-format audio capture. The USB clock/
+validation. A successful app launch alone is not proof of original-format audio capture. The USB clock/
 descriptor and DSD DSP tests likewise do not prove an integrated USB isochronous output driver.

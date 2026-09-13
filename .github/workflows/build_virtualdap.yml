@@ -70,7 +70,10 @@ jobs:
         run: |
           mkdir -p out
           tar --exclude='guest_os/build-*' -czf out/virtualdap-android13-guest-kit.tar.gz \
-            guest_os platform_runtime docs/GUEST_ANDROID_13.md docs/GUEST_BUNDLE.md docs/PLATFORM_RUNTIME.md
+            guest_os platform_runtime docs/GUEST_ANDROID_13.md docs/GUEST_BUNDLE.md docs/PLATFORM_RUNTIME.md \
+            container_runtime/tests/CapturedPcmStreamTest.cpp \
+            container_runtime/core/src/main/cpp/CapturedPcmStream.cpp \
+            container_runtime/core/src/main/cpp/CapturedPcmStream.h
       - name: Upload guest integration kit
         uses: actions/upload-artifact@v4
         with:
