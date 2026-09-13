@@ -9,7 +9,14 @@ add_library(virtualdap_bridge STATIC BridgeTransport.cpp)
 target_include_directories(virtualdap_bridge PUBLIC include)
 target_compile_options(virtualdap_bridge PRIVATE -Wall -Wextra -Werror)
 
-if(NOT ANDROID)
+if(ANDROID)
+    # Small validation client used by integrators to exercise the exact guest-to-host
+    # transport without booting a complete guest image. It is not installed in the
+    # production Android image.
+    add_executable(bridge_smoke_client tools/BridgeSmokeClient.cpp)
+    target_link_libraries(bridge_smoke_client PRIVATE virtualdap_bridge)
+    target_compile_options(bridge_smoke_client PRIVATE -Wall -Wextra -Werror)
+else()
     enable_testing()
     find_package(Threads REQUIRED)
     add_executable(bridge_transport_test tests/BridgeTransportTest.cpp)

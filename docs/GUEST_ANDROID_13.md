@@ -87,3 +87,19 @@ It runs the native socket integration test, cross-compiles the transport for arm
 checks the complete HAL against pinned Android 13 AOSP headers with warnings as errors, and
 validates the audio policy. A full `m audio.primary.virtualdap` build remains the authoritative
 integration test inside an AOSP 13 source tree.
+
+Each Android cross-build also produces `bridge_smoke_client`. Platform integrators can use this
+non-production tool to validate the real guest producer, host peer authentication, protocol ACKs,
+AudioTrack pacing and disconnect handling before a guest image is available:
+
+```shell
+adb root
+adb push guest_os/build-android-arm64-v8a/bridge_smoke_client /data/local/tmp/
+adb shell chmod 755 /data/local/tmp/bridge_smoke_client
+adb shell /data/local/tmp/bridge_smoke_client
+```
+
+Start the pipeline in the host app first. A successful run sends two seconds of 48 kHz, 16-bit
+stereo PCM and reports exactly 96,000 frames with zero dropped bytes. The tool connects as root,
+which is one of the deliberately narrow credentials accepted for a root-backed guest runtime; it
+is not packaged into the host APK or Android guest product.
