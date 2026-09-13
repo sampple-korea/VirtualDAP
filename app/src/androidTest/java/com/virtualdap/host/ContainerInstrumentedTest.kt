@@ -11,6 +11,9 @@ import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.model.PipelinePhase
 import java.io.File
+import java.util.zip.ZipFile
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,6 +71,32 @@ class ContainerInstrumentedTest {
                 await("host resume") { PipelineStore.state.value.framesReceived > pausedFrames }
                 click("Stop")
                 await("captured track release") { !PipelineStore.state.value.guestConnected }
+            }
+            val corrupted = File(context.cacheDir, "instrumented-invalid-signature.apk")
+            try {
+                // Repacking removes the APK signing block; changing classes.dex also invalidates v1.
+                ZipFile(fixture).use { zip ->
+                    ZipOutputStream(corrupted.outputStream()).use { output ->
+                        for (entry in zip.entries().asSequence()) {
+                            output.putNextEntry(ZipEntry(entry.name))
+                            if (!entry.isDirectory) {
+                                val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                                if (entry.name == "classes.dex" && bytes.isNotEmpty()) {
+                                    bytes[bytes.lastIndex] = (bytes.last().toInt() xor 1).toByte()
+                                }
+                                output.write(bytes)
+                            }
+                            output.closeEntry()
+                        }
+                    }
+                }
+                ContainerRuntime.install(Uri.fromFile(corrupted))
+                await("invalid signature rejection") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
+                assertTrue("A tampered update must not report success", ContainerRuntime.state.value.lastError != null)
+                assertTrue("The existing app must survive rejected input",
+                    ContainerRuntime.state.value.applications.any { it.packageName == FIXTURE })
+            } finally {
+                corrupted.delete()
             }
         } finally {
             fixture.delete()

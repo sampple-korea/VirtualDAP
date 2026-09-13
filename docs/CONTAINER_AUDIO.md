@@ -54,7 +54,7 @@ source-frame rounding; hardware latency beyond Android's playback head is not cl
 
 ## Evidence and remaining work
 
-The independent fixture APK runs inside the ordinary-UID API 36 x86_64 emulator and emits 48 kHz
+The independent fixture APK runs inside ordinary-UID API 33/36 x86_64 emulators and emits 48 kHz
 PCM16 and 96 kHz float. Instrumentation verifies reception at the host output, source formats,
 mute/unity gain, pause/resume and no reported drops. The host C++ test checks exact packet bytes, bounded prebuffering,
 flush discard, volume controls, playback position and worker cleanup.

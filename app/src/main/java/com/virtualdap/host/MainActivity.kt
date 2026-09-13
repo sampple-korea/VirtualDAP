@@ -263,7 +263,7 @@ private fun MusicSpaceScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Uses Android ${Build.VERSION.RELEASE} on this device. App data is stored separately; no second OS image is required.",
+                    "Uses Android ${Build.VERSION.RELEASE} on this device. Install only trusted apps: data is stored separately, but this container is not a security sandbox.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Muted,
                 )

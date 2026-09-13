@@ -63,6 +63,16 @@ class PreparedContainerTests(unittest.TestCase):
         for name in ("blackbox", "dobby"):
             self.assertGreater((PREPARED / ("assets/notices/" + name + "-LICENSE.txt")).stat().st_size, 500)
 
+    def test_imported_apk_signatures_are_verified(self):
+        parser = (JAVA / "utils/compat/PackageParserCompat.java").read_text()
+        self.assertIn("collectCertificates(p, false)", parser)
+        self.assertNotIn("collectCertificates(p, true)", parser)
+        manager = (JAVA / "core/system/pm/BPackageManagerService.java").read_text()
+        self.assertIn('result.installError("App import failed: " + t.getMessage())', manager)
+        self.assertIn("Update signing certificate differs", manager)
+        package_record = (JAVA / "core/system/pm/BPackage.java").read_text()
+        self.assertNotIn("this.signatures = signingDetails.pastSigningCertificates", package_record)
+
 
 if __name__ == "__main__":
     unittest.main()

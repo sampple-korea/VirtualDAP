@@ -80,3 +80,45 @@ jobs:
           name: virtualdap-android13-guest-kit
           if-no-files-found: error
           path: out/virtualdap-android13-guest-kit.tar.gz
+
+  consumer-runtime:
+    name: Ordinary-UID runtime (API ${{ matrix.api }})
+    needs: host-app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [33, 36]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: virtualdap-host-debug
+          path: built
+      - name: Enable runner KVM for the test emulator
+        run: sudo chmod a+rw /dev/kvm
+      - name: Test installed consumer APK without root
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          disable-animations: true
+          script: |
+            adb unroot
+            adb wait-for-device
+            adb shell id
+            adb install -r built/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r built/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r com.virtualdap.host.test/androidx.test.runner.AndroidJUnitRunner | tee instrumentation.txt
+            grep -F 'OK (6 tests)' instrumentation.txt
+      - name: Upload instrumentation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtualdap-runtime-api-${{ matrix.api }}
+          path: instrumentation.txt
+          if-no-files-found: warn

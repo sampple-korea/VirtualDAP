@@ -23,13 +23,18 @@ explicitly routed to the host, whose provider checks the caller UID.
 
 - Integrated host/debug and separate music fixture APKs build successfully.
 - Host unit tests and lint pass.
-- Seven prepared-source privacy/native integration regression checks pass.
-- An unrooted API 36 x86_64 emulator installs the independent fixture APK **inside** the music space,
+- Eight prepared-source privacy/native/signature integration regression checks pass.
+- Unrooted API 33 and API 36 x86_64 emulators install the independent fixture APK **inside** the music space,
   launches its Application/Activity in a container process, persists its private launch counter and
   reports the actual process startup back to the host. The fixture is not installed in Android's
   system package manager. This is an instrumentation test, not a timer-based UI simulation.
 - The same fixture's 48 kHz PCM16 and 96 kHz float reach the host audio service. Tests cover
   prebuffering, mute/unity gain, pause/resume, track release and zero reported dropped bytes.
+- Imported APK signatures are verified, tampered updates are rejected, and the existing app remains
+  installed after rejection. Updates require the same current signing certificates; certificate
+  rotation migration is not yet implemented and is conservatively rejected.
+- The full six-test instrumentation suite passes on API 33. CI runs the same installed-APK suite
+  on API 33 and 36, separate from the host build job.
 
 ```sh
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug

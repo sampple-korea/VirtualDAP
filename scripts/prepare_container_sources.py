@@ -177,6 +177,56 @@ def prepare(upstream, dobby, overrides, output):
     )
     provider_delegate.write_text(content, encoding="utf-8")
 
+    parser_compat = package / "utils/compat/PackageParserCompat.java"
+    content = parser_compat.read_text(encoding="utf-8")
+    content = replace_once(
+        content, "BRPackageParserPie.getWithException().collectCertificates(p, true);",
+        "// The boolean means skipVerify, not collect-signatures. Imported APKs must be verified.\n"
+        "            BRPackageParserPie.getWithException().collectCertificates(p, false);",
+    )
+    parser_compat.write_text(content, encoding="utf-8")
+
+    manager = package / "core/system/pm/BPackageManagerService.java"
+    content = manager.read_text(encoding="utf-8")
+    content = replace_once(
+        content,
+        "            BPackageSettings bPackageSettings = mSettings.getPackageLPw(aPackage.packageName, aPackage, option);",
+        "            BPackageSettings existing = mPackages.get(aPackage.packageName);\n"
+        "            android.content.pm.Signature[] incoming = aPackage.mSigningDetails == null\n"
+        "                    ? null : aPackage.mSigningDetails.signatures;\n"
+        "            if (incoming == null || incoming.length == 0) {\n"
+        '                return result.installError("APK has no verified signing certificate");\n'
+        "            }\n"
+        "            if (existing != null && (existing.pkg.mSignatures == null ||\n"
+        "                    !new java.util.HashSet<>(java.util.Arrays.asList(existing.pkg.mSignatures))\n"
+        "                        .equals(new java.util.HashSet<>(java.util.Arrays.asList(incoming))))) {\n"
+        '                return result.installError("Update signing certificate differs from the installed app");\n'
+        "            }\n"
+        "            BPackageSettings bPackageSettings = mSettings.getPackageLPw(aPackage.packageName, aPackage, option);",
+    )
+    content = replace_once(
+        content,
+        "        } catch (Throwable t) {\n            t.printStackTrace();\n"
+        "        } finally {\n            if (stagedFile != null",
+        "        } catch (Throwable t) {\n            t.printStackTrace();\n"
+        '            result.installError("App import failed: " + t.getMessage());\n'
+        "        } finally {\n            if (stagedFile != null",
+    )
+    manager.write_text(content, encoding="utf-8")
+    package_record = package / "core/system/pm/BPackage.java"
+    content = package_record.read_text(encoding="utf-8")
+    content = replace_once(
+        content,
+        "            if (signingDetails.pastSigningCertificates == null) {\n"
+        "                this.signatures = signingDetails.signatures;\n"
+        "            } else {\n"
+        "                this.signatures = signingDetails.pastSigningCertificates;\n"
+        "            }",
+        "            // Current signers must not be replaced by historical rotation certificates.\n"
+        "            this.signatures = signingDetails.signatures;",
+    )
+    package_record.write_text(content, encoding="utf-8")
+
     # Exclude all upstream network implementation and credentials from compiled source.
     (package / "utils/LogSender.java").write_text(
         """package top.niunaijun.blackbox.utils;
