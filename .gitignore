@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.so
+guest_system.img
+mod_package.zip
