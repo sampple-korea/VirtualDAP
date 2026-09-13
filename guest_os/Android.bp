@@ -1,0 +1,24 @@
+cc_library_shared {
+    name: "audio.primary.virtualdap",
+    relative_install_path: "hw",
+    vendor: true,
+    srcs: [
+        "VirtualAudioHAL.cpp",
+        "BridgeTransport.cpp",
+    ],
+    local_include_dirs: ["include"],
+    header_libs: [
+        "libaudio_system_headers",
+        "libhardware_headers",
+    ],
+    shared_libs: [
+        "libcutils",
+        "liblog",
+    ],
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}

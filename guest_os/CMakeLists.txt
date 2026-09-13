@@ -1,33 +1,19 @@
-cmake_minimum_required(VERSION 3.10.2)
-project(VirtualAudioHAL)
-
-# VirtualDAP Audio HAL
-# Compiles to audio.primary.virtualdap.so
+cmake_minimum_required(VERSION 3.16)
+project(VirtualDAPGuestBridge LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find Android HAL headers (These locations depend on NDK or sysroot)
-# In a real CI with NDK, we might link against stub libraries or headers.
-# For this PoC, we will assume headers are available or include local stubs if needed.
-include_directories(include)
+add_library(virtualdap_bridge STATIC BridgeTransport.cpp)
+target_include_directories(virtualdap_bridge PUBLIC include)
+target_compile_options(virtualdap_bridge PRIVATE -Wall -Wextra -Werror)
 
-# Source files
-add_library(audio.primary.virtualdap SHARED
-    VirtualAudioHAL.cpp
-)
-
-# Libraries to link against (log, cutils, hardware etc.)
-# Since we are using NDK, these are usually provided by the NDK platform
-find_library(log-lib log)
-find_library(android-lib android)
-
-target_link_libraries(audio.primary.virtualdap
-    ${log-lib}
-    ${android-lib}
-)
-
-# Rename output to match HAL naming convention
-set_target_properties(audio.primary.virtualdap PROPERTIES
-    PREFIX ""
-    SUFFIX ".so"
-)
+if(NOT ANDROID)
+    enable_testing()
+    find_package(Threads REQUIRED)
+    add_executable(bridge_transport_test tests/BridgeTransportTest.cpp)
+    target_link_libraries(bridge_transport_test PRIVATE virtualdap_bridge Threads::Threads)
+    target_compile_options(bridge_transport_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME bridge_transport_test COMMAND bridge_transport_test)
+endif()
