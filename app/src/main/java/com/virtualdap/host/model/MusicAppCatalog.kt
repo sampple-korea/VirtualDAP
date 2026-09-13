@@ -26,5 +26,17 @@ object MusicAppCatalog {
         SupportedMusicApp("USB Audio Player PRO", "com.extreamsd.usbaudioplayerpro", AppAudioPath.LOCAL_HI_RES_PCM, "Use Android/AudioTrack output inside the guest; direct USB access belongs to the host."),
         SupportedMusicApp("foobar2000", "com.foobar2000.foobar2000", AppAudioPath.LOCAL_HI_RES_PCM, "System PCM playback is supported."),
         SupportedMusicApp("Bandcamp", "com.bandcamp.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
+        SupportedMusicApp("Pandora", "com.pandora.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
+        SupportedMusicApp("iHeartRadio", "com.clearchannel.iheartradio.controller", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "Live radio and music use the same guest PCM path."),
+        SupportedMusicApp("TuneIn Radio", "tunein.player", AppAudioPath.SYSTEM_PCM, "Live and on-demand playback use the guest system PCM path."),
+        SupportedMusicApp("Melon", "com.iloen.melon", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported; account and device policy remain provider-controlled."),
+        SupportedMusicApp("Genie Music", "com.ktmusic.geniemusic", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
+        SupportedMusicApp("Bugs", "com.neowiz.android.bugs", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
+        SupportedMusicApp("FLO", "skplanet.musicmate", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
+        SupportedMusicApp("NAVER VIBE", "com.naver.vibe", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported."),
+        SupportedMusicApp("KKBOX", "com.skysoft.kkbox.android", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
+        SupportedMusicApp("Audiomack", "com.audiomack", AppAudioPath.SYSTEM_PCM, "System PCM playback is supported."),
+        SupportedMusicApp("Anghami", "com.anghami", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
+        SupportedMusicApp("JioSaavn", "com.jio.media.jiobeats", AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS, "System PCM playback is supported where the service is available."),
     )
 }

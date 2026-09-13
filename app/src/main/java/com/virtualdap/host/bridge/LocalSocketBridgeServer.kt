@@ -3,6 +3,7 @@ package com.virtualdap.host.bridge
 import android.net.Credentials
 import android.net.LocalServerSocket
 import android.net.LocalSocket
+import android.os.Process
 import android.util.Log
 import com.virtualdap.host.audio.PcmFormat
 import java.io.Closeable
@@ -21,6 +22,7 @@ interface BridgeEvents {
 class LocalSocketBridgeServer(
     private val events: BridgeEvents,
     private val socketName: String = SOCKET_NAME,
+    private val peerPolicy: BridgePeerPolicy = BridgePeerPolicy(Process.myUid()),
 ) : Closeable {
     private val running = AtomicBoolean(false)
     @Volatile private var server: LocalServerSocket? = null
@@ -57,13 +59,25 @@ class LocalSocketBridgeServer(
     private fun handleClient(socket: LocalSocket) {
         var disconnectReason: String? = null
         try {
+            val peer = socket.peerCredentials
+            if (!peerPolicy.isAllowed(peer.uid)) {
+                throw BridgeProtocolException("Rejected bridge peer uid ${peer.uid}")
+            }
             socket.receiveBufferSize = 256 * 1024
             val reader = BridgeWireReader(socket.inputStream)
             val handshake = reader.readHandshake()
-            events.onGuestConnected(socket.peerCredentials, handshake)
+            events.onGuestConnected(peer, handshake)
             var currentFormat = handshake.format
+            var lastSequence = -1L
             while (running.get()) {
-                when (val message = reader.readMessage() ?: break) {
+                val message = reader.readMessage() ?: break
+                if (message.sequence <= lastSequence) {
+                    throw BridgeProtocolException(
+                        "Non-monotonic packet sequence ${message.sequence} after $lastSequence",
+                    )
+                }
+                lastSequence = message.sequence
+                when (message) {
                     is BridgeMessage.Audio -> {
                         if (message.pcm.size % currentFormat.frameSizeBytes != 0) {
                             throw BridgeProtocolException(
