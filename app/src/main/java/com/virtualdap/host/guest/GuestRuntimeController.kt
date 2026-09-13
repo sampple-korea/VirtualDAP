@@ -10,6 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.Surface
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.runtime.IGuestRuntimeCallback
@@ -47,7 +50,7 @@ data class GuestRuntimeSnapshot(
 object GuestRuntimeController {
     const val ACTION_RUNTIME = "com.virtualdap.runtime.GUEST_RUNTIME"
     const val BIND_PERMISSION = "com.virtualdap.host.permission.BIND_GUEST_RUNTIME"
-    const val PROTOCOL_VERSION = 1
+    const val PROTOCOL_VERSION = 2
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow(GuestRuntimeSnapshot())
@@ -182,6 +185,53 @@ object GuestRuntimeController {
                 service.stop()
             } catch (error: Exception) {
                 runtimeFailed("Could not stop guest: ${error.message}")
+            }
+        }
+    }
+
+    fun attachDisplay(surface: Surface, width: Int, height: Int, densityDpi: Int) {
+        if (!surface.isValid || width <= 0 || height <= 0 || densityDpi <= 0) return
+        val service = runtime ?: return
+        scope.launch {
+            try {
+                service.attachDisplay(surface, width, height, densityDpi)
+            } catch (error: Exception) {
+                runtimeFailed("Could not attach guest display: ${error.message}")
+            }
+        }
+    }
+
+    fun detachDisplay() {
+        val service = runtime ?: return
+        scope.launch {
+            runCatching { service.detachDisplay() }.onFailure { error ->
+                PipelineStore.log("Could not detach guest display: ${error.message}", LogLevel.WARNING)
+            }
+        }
+    }
+
+    fun injectMotionEvent(event: MotionEvent) {
+        val service = runtime ?: return
+        val copy = MotionEvent.obtain(event)
+        scope.launch {
+            try {
+                service.injectMotionEvent(copy)
+            } catch (error: Exception) {
+                PipelineStore.log("Guest touch input failed: ${error.message}", LogLevel.WARNING)
+            } finally {
+                copy.recycle()
+            }
+        }
+    }
+
+    fun injectKeyEvent(event: KeyEvent) {
+        val service = runtime ?: return
+        val copy = KeyEvent(event)
+        scope.launch {
+            try {
+                service.injectKeyEvent(copy)
+            } catch (error: Exception) {
+                PipelineStore.log("Guest key input failed: ${error.message}", LogLevel.WARNING)
             }
         }
     }

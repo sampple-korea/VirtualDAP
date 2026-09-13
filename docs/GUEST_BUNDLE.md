@@ -56,10 +56,12 @@ The regular host APK cannot safely mount a full Android disk or create virtual m
 Android. A device integration therefore supplies exactly one platform-signed service for action
 `com.virtualdap.runtime.GUEST_RUNTIME`. The service declares
 `com.virtualdap.host.permission.BIND_GUEST_RUNTIME` and implements protocol version 1 from
-`IGuestRuntimeService.aidl`.
+`IGuestRuntimeService.aidl` (protocol version 2).
 
 The host verifies that the resolved provider is a system app signed with the same certificate as
 the Android platform. It passes a read-only `ParcelFileDescriptor`, never its private filesystem
 path. The provider owns VM/container lifecycle, display/input plumbing, network setup, verified
 boot, and the guest-side socket or vsock proxy. Runtime states are the integer constants documented
-in `GuestRuntimeController.RuntimeState`.
+in `GuestRuntimeController.RuntimeState`. Once running, the host attaches an Android `Surface` and
+forwards cloned `MotionEvent` and `KeyEvent` objects through Binder; the provider must preserve their
+coordinates, pointer IDs and event times when injecting them into the guest compositor/input stack.

@@ -1,9 +1,12 @@
 package com.virtualdap.host
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -12,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -72,6 +76,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -306,6 +311,9 @@ private fun GuestScreen(
                 }
             }
         }
+        if (snapshot.phase == GuestRuntimePhase.RUNNING) {
+            item { GuestDisplay() }
+        }
         item {
             SectionCard(title = "Service integrity", icon = Icons.Rounded.Info) {
                 Text(
@@ -316,6 +324,66 @@ private fun GuestScreen(
             }
         }
         snapshot.lastError?.let { error -> item { ErrorCard(error) } }
+    }
+}
+
+@Composable
+@SuppressLint("ClickableViewAccessibility") // The surface forwards raw multi-pointer gestures to the guest.
+private fun GuestDisplay() {
+    SectionCard(title = "Guest display", icon = Icons.Rounded.PhoneAndroid) {
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().aspectRatio(9f / 16f)
+                .background(Color.Black, RoundedCornerShape(12.dp)),
+            factory = { viewContext ->
+                SurfaceView(viewContext).apply {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    setOnTouchListener { _, event ->
+                        GuestRuntimeController.injectMotionEvent(event)
+                        true
+                    }
+                    setOnKeyListener { _, _, event ->
+                        GuestRuntimeController.injectKeyEvent(event)
+                        true
+                    }
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            requestFocus()
+                        }
+
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                            GuestRuntimeController.attachDisplay(
+                                holder.surface,
+                                width,
+                                height,
+                                resources.displayMetrics.densityDpi,
+                            )
+                        }
+
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            GuestRuntimeController.detachDisplay()
+                        }
+                    })
+                }
+            },
+            update = { view ->
+                if (view.holder.surface.isValid && view.width > 0 && view.height > 0) {
+                    GuestRuntimeController.attachDisplay(
+                        view.holder.surface,
+                        view.width,
+                        view.height,
+                        view.resources.displayMetrics.densityDpi,
+                    )
+                }
+            },
+            onRelease = { GuestRuntimeController.detachDisplay() },
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Touch and hardware-key events are forwarded to the isolated guest. Audio remains on the dedicated PCM bridge.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Muted,
+        )
     }
 }
 

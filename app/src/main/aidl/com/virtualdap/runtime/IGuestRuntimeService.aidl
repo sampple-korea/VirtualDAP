@@ -1,6 +1,9 @@
 package com.virtualdap.runtime;
 
 import android.os.ParcelFileDescriptor;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.Surface;
 import com.virtualdap.runtime.IGuestRuntimeCallback;
 
 /**
@@ -14,4 +17,8 @@ interface IGuestRuntimeService {
     String getStateDetail();
     void start(in ParcelFileDescriptor guestImage, String manifest, IGuestRuntimeCallback callback);
     void stop();
+    void attachDisplay(in Surface surface, int width, int height, int densityDpi);
+    void detachDisplay();
+    void injectMotionEvent(in MotionEvent event);
+    void injectKeyEvent(in KeyEvent event);
 }
