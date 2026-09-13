@@ -1,21 +1,25 @@
 # VirtualDAP
 
-VirtualDAP is an Android host and guest-audio platform that carries decoded PCM from an isolated
-Android 13 music environment to the host's built-in output or a selected USB DAC.
+VirtualDAP is an Android music-container and audio-output project that carries decoded PCM from
+isolated music applications to built-in audio or a selected USB DAC.
+
+The consumer runtime is being changed to an ordinary-APK app container: no root, platform signing,
+OEM allowlist or KVM permission is required by the intended product. The earlier AVF reference
+provider is not sufficient for this requirement. See the
+[rootless runtime and USB/DSD requirements](docs/ROOTLESS_RUNTIME.md) for the current implementation
+boundary. The repository is not yet a completed install-and-boot consumer release.
 
 The repository no longer presents a timed UI simulation as a working guest. Status changes are
 driven by a real versioned bridge connection, validated PCM packets and the actual Android output
 route.
 
-## Audio path
+## Audio bridge
 
-```text
-music app → guest AudioFlinger → VirtualDAP primary HAL
-          → abstract Unix socket (format + PCM + counters)
-          → host foreground service → AudioTrack → selected output / USB DAC
-```
+The host socket receiver and output pipeline are implemented and tested. The consumer container's
+decoded-audio interception is still being integrated. The older full-OS reference captures at its
+Audio HAL boundary; that reference does not make container capture complete.
 
-The guest policy offers a normal mixed route for mainstream services and direct PCM profiles for
+The existing Android 13 guest HAL reference offers a normal mixed route for mainstream services and direct PCM profiles for
 hi-res players. Compressed offload is intentionally absent so an app cannot bypass capture. The
 host rebuilds `AudioTrack` on a format epoch, applies backpressure with blocking writes, monitors
 disconnects/drops, enumerates real audio routes, and tries the exact source PCM first. If the host
@@ -25,12 +29,14 @@ software conversion, Android direct support and a mixer path; it never labels an
 as bit-perfect. Reported queue latency is derived from submitted frames minus the live AudioTrack
 playback head.
 
-## Supported music applications
+## Music application compatibility target
 
-The capture point is system-wide, not app-specific. Apple Music, Spotify, YouTube Music, TIDAL,
+The intended capture point is shared by standard audio clients, not app-specific. Apple Music, Spotify, YouTube Music, TIDAL,
 Qobuz, Amazon Music, Deezer, SoundCloud, Bandcamp, Plexamp, Poweramp, Neutron, USB Audio Player
 PRO (using its Android/AudioTrack driver), foobar2000 and other standard AudioTrack clients use the
-same PCM path.
+same intended PCM path. Catalog inclusion is not proof that installation, login, decoding and
+playback have been verified for that service. Individual compatibility results must be recorded
+before any service is labeled verified.
 
 Subscriptions, regional restrictions, service login, Widevine, Play Integrity and guest image
 certification remain controlled by each provider. VirtualDAP does not bypass DRM or attestation.
@@ -40,11 +46,16 @@ certification remain controlled by each provider. VirtualDAP does not bypass DRM
 Requirements: JDK 17 and Android SDK 37 (the app still targets API 36 for the current Play policy).
 
 ```shell
+git submodule update --init --recursive
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The Diagnostics tab includes a
 clearly labeled host-only output tone test; it is disabled while guest playback is active.
+
+DoP framing and the native DSD-to-PCM filter are described in [DSD pipeline](docs/DSD_PIPELINE.md).
+The filter is built for all four Android ABIs with NDK 28.2.13676358; its license notice is included
+in APK assets.
 
 ## Build and test the Android 13 guest bridge
 
@@ -55,9 +66,9 @@ scripts/verify_guest.sh
 ```
 
 See [Android 13 guest integration](docs/GUEST_ANDROID_13.md) for Soong/product configuration and
-the audio integration. The host's Guest screen imports the strict, streamed and hash-verified
+the audio integration. The retained legacy code imports the strict, streamed and hash-verified
 [guest bundle format](docs/GUEST_BUNDLE.md), and connects only to one platform-signed runtime
-provider. Stock third-party app permissions are intentionally not represented as sufficient to
+provider; it is not the current consumer Music space screen. Stock third-party app permissions are intentionally not represented as sufficient to
 mount or boot a full Android guest. A reference graphical Android Virtualization Framework provider,
 authenticated vsock proxy and product integration boundary are documented in
 [AVF platform runtime](docs/PLATFORM_RUNTIME.md).
@@ -74,3 +85,7 @@ authenticated vsock proxy and product integration boundary are documented in
   rate-limited so AudioFlinger cannot spin when the host is unavailable.
 
 The Kotlin and C++ implementations are independently unit/integration tested in CI.
+
+The consumer app now targets Android 13 or later and is integrating the source-built BlackBox
+container. Its installation/lifecycle UI and capture hooks must be validated together before a
+consumer-ready release; the legacy HAL/AVF reference path is not a substitute for that validation.

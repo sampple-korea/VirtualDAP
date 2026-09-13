@@ -1,3 +1,9 @@
 [submodule "third_party/dsd2pcm"]
 	path = third_party/dsd2pcm
 	url = https://github.com/clivem/dsd2pcm.git
+[submodule "third_party/blackbox"]
+	path = third_party/blackbox
+	url = https://github.com/Black00Z/Blacks-BlackBox.git
+[submodule "third_party/dobby"]
+	path = third_party/dobby
+	url = https://github.com/JingMatrix/Dobby.git

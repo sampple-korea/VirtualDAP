@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val prepareMusicFixture = tasks.register<Copy>("prepareMusicFixture") {
+    dependsOn(":musicFixture:assembleDebug")
+    from(project(":musicFixture").layout.buildDirectory.file("outputs/apk/debug/musicFixture-debug.apk"))
+    into(layout.buildDirectory.dir("generated/musicFixtureAssets"))
+    rename { "music-fixture.apk" }
+}
+
 android {
     namespace = "com.virtualdap.host"
     compileSdk = 37
@@ -10,7 +17,7 @@ android {
 
     defaultConfig {
         applicationId = "com.virtualdap.host"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -44,6 +51,9 @@ android {
     // Exercise the exact pure-JVM disk lifecycle used by the privileged AOSP runtime in CI.
     sourceSets.getByName("test").kotlin.directories.add(rootProject.file("platform_runtime/core").path)
     sourceSets.getByName("androidTest").kotlin.directories.add(rootProject.file("platform_runtime/input").path)
+    sourceSets.getByName("androidTest").assets.directories.add(
+        layout.buildDirectory.dir("generated/musicFixtureAssets").get().asFile.path,
+    )
     sourceSets.getByName("main").assets.directories.add(rootProject.file("third_party/notices").path)
     packaging {
         resources {
@@ -56,7 +66,12 @@ android {
     }
 }
 
+tasks.configureEach {
+    if (name == "mergeDebugAndroidTestAssets") dependsOn(prepareMusicFixture)
+}
+
 dependencies {
+    implementation(project(":containerCore"))
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")

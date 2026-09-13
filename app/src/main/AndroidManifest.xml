@@ -23,6 +23,10 @@
         android:roundIcon="@drawable/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.VirtualDAP">
+        <provider
+            android:name=".container.ContainerEventProvider"
+            android:authorities="${applicationId}.container.events"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

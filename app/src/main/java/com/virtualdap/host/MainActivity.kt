@@ -93,6 +93,9 @@ import com.virtualdap.host.guest.GuestRuntimeController
 import com.virtualdap.host.guest.GuestRuntimePhase
 import com.virtualdap.host.guest.GuestRuntimeSnapshot
 import com.virtualdap.host.guest.GuestServices
+import com.virtualdap.host.container.ContainerPhase
+import com.virtualdap.host.container.ContainerRuntime
+import com.virtualdap.host.container.ContainerSnapshot
 import com.virtualdap.host.model.AppAudioPath
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.MusicAppCatalog
@@ -123,7 +126,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppSection(val label: String, val icon: ImageVector) {
     PLAYER("Player", Icons.Rounded.Headphones),
-    GUEST("Guest", Icons.Rounded.PhoneAndroid),
+    GUEST("Music space", Icons.Rounded.PhoneAndroid),
     APPS("Apps", Icons.Rounded.LibraryMusic),
     DIAGNOSTICS("Diagnostics", Icons.AutoMirrored.Rounded.List),
 }
@@ -132,31 +135,31 @@ private enum class AppSection(val label: String, val icon: ImageVector) {
 private fun VirtualDAPApp() {
     val context = LocalContext.current
     val snapshot by PipelineStore.state.collectAsStateWithLifecycle()
-    val guestSnapshot by GuestRuntimeController.state.collectAsStateWithLifecycle()
+    val containerSnapshot by ContainerRuntime.state.collectAsStateWithLifecycle()
     var selectedSection by rememberSaveable { mutableStateOf(AppSection.PLAYER) }
     var pendingPermissionAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
-    var pendingGuestStart by rememberSaveable { mutableStateOf(false) }
+    var pendingPackageName by rememberSaveable { mutableStateOf<String?>(null) }
     val bundlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(GuestRuntimeController::importBundle)
+        uri?.let(ContainerRuntime::install)
     }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
         AudioPipelineService.command(context, pendingPermissionAction)
-        if (pendingGuestStart) GuestRuntimeController.start()
-        pendingGuestStart = false
+        pendingPackageName?.let(ContainerRuntime::launch)
+        pendingPackageName = null
     }
 
-    fun startWithPermission(action: String, startGuest: Boolean = false) {
+    fun startWithPermission(action: String, packageName: String? = null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             pendingPermissionAction = action
-            pendingGuestStart = startGuest
+            pendingPackageName = packageName
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             AudioPipelineService.command(context, action)
-            if (startGuest) GuestRuntimeController.start()
+            packageName?.let(ContainerRuntime::launch)
         }
     }
 
@@ -200,17 +203,102 @@ private fun VirtualDAPApp() {
                         )
                     },
                 )
-                AppSection.GUEST -> GuestScreen(
-                    snapshot = guestSnapshot,
-                    onImport = { bundlePicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-                    onStart = { startWithPermission(AudioPipelineService.ACTION_START, startGuest = true) },
-                    onStop = GuestRuntimeController::stop,
+                AppSection.GUEST -> MusicSpaceScreen(
+                    snapshot = containerSnapshot,
+                    onImport = {
+                        bundlePicker.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream"))
+                    },
+                    onLaunch = { startWithPermission(AudioPipelineService.ACTION_START, packageName = it) },
+                    onStop = ContainerRuntime::stop,
+                    onRefresh = ContainerRuntime::refresh,
                 )
                 AppSection.APPS -> AppsScreen()
                 AppSection.DIAGNOSTICS -> DiagnosticsScreen(
                     snapshot = snapshot,
                     onSelfTest = { startWithPermission(AudioPipelineService.ACTION_SELF_TEST) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicSpaceScreen(
+    snapshot: ContainerSnapshot,
+    onImport: () -> Unit,
+    onLaunch: (String) -> Unit,
+    onStop: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val busy = snapshot.phase == ContainerPhase.INITIALIZING || snapshot.phase == ContainerPhase.INSTALLING
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            ScreenHeader(
+                eyebrow = "Music space",
+                title = "Your apps. Your audio.",
+                subtitle = "Add music apps to a separate app space. Runs on your Android without root.",
+            )
+        }
+        item {
+            SectionCard(title = "App container", icon = Icons.Rounded.PhoneAndroid) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(22.dp), color = Amber, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    Text(snapshot.detail, style = MaterialTheme.typography.bodyMedium)
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onImport, enabled = snapshot.phase == ContainerPhase.READY, modifier = Modifier.weight(1f)) {
+                        Text("Add APK / APKS")
+                    }
+                    OutlinedButton(onClick = onRefresh, enabled = !busy, modifier = Modifier.weight(1f)) {
+                        Text("Refresh")
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Uses Android ${Build.VERSION.RELEASE} on this device. App data is stored separately; no second OS image is required.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Muted,
+                )
+            }
+        }
+        snapshot.lastError?.let { error -> item { ErrorCard(error) } }
+        if (snapshot.applications.isEmpty() && !busy) {
+            item {
+                SectionCard(title = "Ready for your music apps", icon = Icons.Rounded.LibraryMusic) {
+                    Text(
+                        "Choose an APK or a split APK set (.apks). Installed apps will appear here with launch and stop controls.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Muted,
+                    )
+                }
+            }
+        }
+        items(snapshot.applications, key = { it.packageName }) { app ->
+            SectionCard(title = app.name, icon = Icons.Rounded.LibraryMusic) {
+                Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = Muted)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { onLaunch(app.packageName) },
+                        enabled = snapshot.phase == ContainerPhase.READY,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Open app")
+                    }
+                    OutlinedButton(onClick = { onStop(app.packageName) }, modifier = Modifier.weight(1f)) {
+                        Text("Stop app")
+                    }
+                }
             }
         }
     }
