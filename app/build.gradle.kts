@@ -67,7 +67,10 @@ android {
 }
 
 tasks.configureEach {
-    if (name == "mergeDebugAndroidTestAssets") dependsOn(prepareMusicFixture)
+    if (name == "mergeDebugAndroidTestAssets" ||
+        name == "generateDebugAndroidTestLintModel" ||
+        name == "lintAnalyzeDebugAndroidTest"
+    ) dependsOn(prepareMusicFixture)
 }
 
 dependencies {
