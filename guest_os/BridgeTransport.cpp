@@ -23,12 +23,23 @@ namespace {
 
 constexpr int64_t kReconnectIntervalNs = 250LL * 1000LL * 1000LL;
 constexpr suseconds_t kSendTimeoutMicros = 500 * 1000;
-constexpr int kSocketBufferBytes = 128 * 1024;
+constexpr suseconds_t kReceiveTimeoutMicros = 2 * 1000 * 1000;
+constexpr int kSocketBufferBytes = 32 * 1024;
 
 int64_t monotonic_time_ns() {
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now);
     return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
+}
+
+uint32_t get_u32_le(const uint8_t* input) {
+    return static_cast<uint32_t>(input[0]) | (static_cast<uint32_t>(input[1]) << 8u) |
+           (static_cast<uint32_t>(input[2]) << 16u) | (static_cast<uint32_t>(input[3]) << 24u);
+}
+
+uint64_t get_u64_le(const uint8_t* input) {
+    return static_cast<uint64_t>(get_u32_le(input)) |
+           (static_cast<uint64_t>(get_u32_le(input + 4)) << 32u);
 }
 
 }  // namespace
@@ -114,6 +125,11 @@ bool BridgeTransport::write(const PcmConfig& config, const void* pcm, size_t byt
             disconnect_locked();
             return false;
         }
+        if (!receive_ack_locked(packet_sequence)) {
+            dropped_bytes_ += byte_count - sent;
+            disconnect_locked();
+            return false;
+        }
         sent += chunk;
         frames_written_ += chunk / config.frame_size;
         if ((packet_sequence & 0x3fu) == 0 && !send_stats_locked()) {
@@ -166,6 +182,9 @@ bool BridgeTransport::connect_locked(const PcmConfig& config) {
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof(send_buffer));
     const timeval timeout{0, kSendTimeoutMicros};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    const timeval receive_timeout{static_cast<time_t>(kReceiveTimeoutMicros / 1000000),
+                                  static_cast<suseconds_t>(kReceiveTimeoutMicros % 1000000)};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
 
     int connect_result = -1;
     if (use_vsock) {
@@ -244,6 +263,30 @@ bool BridgeTransport::send_all_locked(const void* data, size_t byte_count) {
         const ssize_t result = send(socket_fd_, bytes + sent, byte_count - sent, MSG_NOSIGNAL);
         if (result > 0) {
             sent += static_cast<size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) continue;
+        return false;
+    }
+    return true;
+}
+
+bool BridgeTransport::receive_ack_locked(uint64_t expected_sequence) {
+    std::array<uint8_t, kAckBytes> ack{};
+    if (!receive_all_locked(ack.data(), ack.size())) return false;
+    return get_u32_le(ack.data()) == kAckMagic &&
+           static_cast<uint16_t>(ack[4] | (static_cast<uint16_t>(ack[5]) << 8u)) ==
+               kProtocolVersion &&
+           ack[6] == 0 && ack[7] == 0 && get_u64_le(ack.data() + 8) == expected_sequence;
+}
+
+bool BridgeTransport::receive_all_locked(void* data, size_t byte_count) {
+    auto* bytes = static_cast<uint8_t*>(data);
+    size_t received = 0;
+    while (received < byte_count) {
+        const ssize_t result = recv(socket_fd_, bytes + received, byte_count - received, 0);
+        if (result > 0) {
+            received += static_cast<size_t>(result);
             continue;
         }
         if (result < 0 && errno == EINTR) continue;

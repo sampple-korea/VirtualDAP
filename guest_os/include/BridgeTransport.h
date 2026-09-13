@@ -39,6 +39,8 @@ class BridgeTransport {
     bool send_message_locked(MessageType type, const void* payload, uint32_t payload_size,
                              uint64_t sequence);
     bool send_all_locked(const void* data, size_t byte_count);
+    bool receive_ack_locked(uint64_t expected_sequence);
+    bool receive_all_locked(void* data, size_t byte_count);
     void disconnect_locked();
 
     const std::string endpoint_;

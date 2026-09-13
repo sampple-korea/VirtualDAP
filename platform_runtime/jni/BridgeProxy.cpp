@@ -173,13 +173,33 @@ class BridgeProxy {
         }
         std::array<uint8_t, kBufferBytes> buffer{};
         while (running_.load()) {
-            const ssize_t received = recv(client, buffer.data(), buffer.size(), 0);
-            if (received > 0) {
-                if (!send_all(local, buffer.data(), static_cast<size_t>(received))) break;
-                continue;
+            pollfd descriptors[2] = {
+                {client, POLLIN, 0},
+                {local, POLLIN, 0},
+            };
+            const int ready = poll(descriptors, 2, -1);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                break;
             }
-            if (received < 0 && errno == EINTR) continue;
-            break;
+            if ((descriptors[0].revents & POLLIN) != 0) {
+                const ssize_t received = recv(client, buffer.data(), buffer.size(), 0);
+                if (received <= 0 ||
+                    !send_all(local, buffer.data(), static_cast<size_t>(received))) {
+                    break;
+                }
+            }
+            if ((descriptors[1].revents & POLLIN) != 0) {
+                const ssize_t received = recv(local, buffer.data(), buffer.size(), 0);
+                if (received <= 0 ||
+                    !send_all(client, buffer.data(), static_cast<size_t>(received))) {
+                    break;
+                }
+            }
+            if ((descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
+                (descriptors[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                break;
+            }
         }
     }
 

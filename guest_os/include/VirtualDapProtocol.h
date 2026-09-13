@@ -7,9 +7,11 @@
 namespace virtualdap {
 
 constexpr uint32_t kMagic = 0x56444150u;
-constexpr uint16_t kProtocolVersion = 1u;
+constexpr uint32_t kAckMagic = 0x56444141u;
+constexpr uint16_t kProtocolVersion = 2u;
 constexpr uint16_t kHandshakeBytes = 32u;
 constexpr uint16_t kMessageHeaderBytes = 16u;
+constexpr uint16_t kAckBytes = 16u;
 constexpr uint32_t kMaximumPayloadBytes = 1024u * 1024u;
 constexpr const char* kDefaultSocketName = "virtualdap_audio_v1";
 

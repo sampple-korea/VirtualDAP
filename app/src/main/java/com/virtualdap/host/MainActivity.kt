@@ -683,7 +683,7 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
 private fun MetricsRow(snapshot: PipelineSnapshot) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         MetricCard(Modifier.weight(1f), "RECEIVED", humanBytes(snapshot.bytesReceived))
-        MetricCard(Modifier.weight(1f), "EST. QUEUE", snapshot.latencyMs?.let { "%.1f ms".format(it) } ?: "—")
+        MetricCard(Modifier.weight(1f), "TRACK QUEUE", snapshot.latencyMs?.let { "%.1f ms".format(it) } ?: "—")
         MetricCard(Modifier.weight(1f), "DROPPED", humanBytes(snapshot.guestDroppedBytes))
     }
 }

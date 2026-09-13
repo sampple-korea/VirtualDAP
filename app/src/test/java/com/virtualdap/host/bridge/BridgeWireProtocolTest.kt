@@ -2,6 +2,7 @@ package com.virtualdap.host.bridge
 
 import com.virtualdap.host.audio.PcmEncoding
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertArrayEquals
@@ -10,6 +11,19 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class BridgeWireProtocolTest {
+    @Test
+    fun writesSubmissionAcknowledgementInLittleEndian() {
+        val output = ByteArrayOutputStream()
+        BridgeWireWriter.writeAck(output, 0x0102030405060708L)
+
+        val data = ByteBuffer.wrap(output.toByteArray()).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(BridgeWireProtocol.ACK_MAGIC, data.int)
+        assertEquals(BridgeWireProtocol.VERSION, data.short)
+        assertEquals(0, data.short.toInt())
+        assertEquals(0x0102030405060708L, data.long)
+        assertEquals(BridgeWireProtocol.ACK_BYTES, output.size())
+    }
+
     @Test
     fun parsesHandshakeAndAudioPacket() {
         val handshake = ByteBuffer.allocate(BridgeWireProtocol.HANDSHAKE_BYTES)

@@ -241,13 +241,16 @@ ssize_t out_write(audio_stream_out* stream, const void* buffer, size_t byte_coun
         selected = output->device->direct_output == nullptr || output->device->direct_output == output;
     }
     if (selected) {
-        output->device->transport.write(stream_config(output), buffer, byte_count);
+        const bool delivered = output->device->transport.write(
+            stream_config(output), buffer, byte_count);
+        if (!delivered) pace_output(output, frames);
+        else output->next_deadline_ns = 0;
     } else {
         // A direct hi-res stream owns the bridge. Guest UI/notification mixer audio is discarded.
         output->device->transport.note_dropped(byte_count);
+        pace_output(output, frames);
     }
     output->frames_accepted += frames;
-    pace_output(output, frames);
     return static_cast<ssize_t>(byte_count);
 }
 

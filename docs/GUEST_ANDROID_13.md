@@ -58,7 +58,10 @@ For a Linux-container backend, the guest and host share the abstract Unix socket
 proxies port 45000 into the host app's authenticated abstract socket. The runtime also injects the
 per-start `androidboot.virtualdap.bridge_token`; the HAL sends its decoded 32 bytes before the wire
 handshake and the proxy uses a constant-time comparison before granting access. Both transports are
-blocking, so backpressure reaches AudioFlinger instead of growing an unbounded queue.
+full duplex. After each PCM packet, the host returns a sequence-matched submission ACK only after
+the blocking AudioTrack write completes. That single-packet window propagates backpressure to
+AudioFlinger instead of growing a hidden socket queue. When disconnected, the HAL alone applies
+real-time pacing so music applications cannot spin.
 
 ## Music service compatibility
 

@@ -34,6 +34,14 @@ uint32_t get_u32(const uint8_t* data) {
            (static_cast<uint32_t>(data[2]) << 16u) | (static_cast<uint32_t>(data[3]) << 24u);
 }
 
+void send_ack(int fd, uint64_t sequence) {
+    std::array<uint8_t, virtualdap::kAckBytes> ack{};
+    virtualdap::put_u32_le(ack.data(), virtualdap::kAckMagic);
+    virtualdap::put_u16_le(ack.data() + 4, virtualdap::kProtocolVersion);
+    virtualdap::put_u64_le(ack.data() + 8, sequence);
+    CHECK(send(fd, ack.data(), ack.size(), MSG_NOSIGNAL) == static_cast<ssize_t>(ack.size()));
+}
+
 bool read_exact(int fd, void* output, size_t size) {
     auto* bytes = static_cast<uint8_t*>(output);
     size_t received = 0;
@@ -103,6 +111,7 @@ int main() {
         for (size_t index = 0; index < received.size(); ++index) {
             CHECK(received[index] == static_cast<uint8_t>(index));
         }
+        send_ack(client, 1);
         verified.store(true);
         close(client);
     });

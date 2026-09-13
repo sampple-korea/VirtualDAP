@@ -31,13 +31,19 @@ class LocalSocketBridgeServer(
 
     fun start() {
         check(running.compareAndSet(false, true)) { "Bridge server is already running" }
-        worker = Thread(::acceptLoop, "VirtualDAP-bridge").apply { start() }
-    }
-
-    private fun acceptLoop() {
         try {
             val listener = LocalServerSocket(socketName)
             server = listener
+            worker = Thread({ acceptLoop(listener) }, "VirtualDAP-bridge").apply { start() }
+        } catch (error: IOException) {
+            running.set(false)
+            server = null
+            throw error
+        }
+    }
+
+    private fun acceptLoop(listener: LocalServerSocket) {
+        try {
             while (running.get()) {
                 val accepted = try {
                     listener.accept()
@@ -49,9 +55,8 @@ class LocalSocketBridgeServer(
                 handleClient(accepted)
                 client = null
             }
-        } catch (error: IOException) {
-            if (running.get()) events.onGuestDisconnected("Unable to open bridge socket: ${error.message}")
         } finally {
+            try { listener.close() } catch (_: IOException) { }
             server = null
         }
     }
@@ -63,8 +68,9 @@ class LocalSocketBridgeServer(
             if (!peerPolicy.isAllowed(peer.uid)) {
                 throw BridgeProtocolException("Rejected bridge peer uid ${peer.uid}")
             }
-            socket.receiveBufferSize = 256 * 1024
+            socket.receiveBufferSize = 64 * 1024
             val reader = BridgeWireReader(socket.inputStream)
+            val output = socket.outputStream
             val handshake = reader.readHandshake()
             events.onGuestConnected(peer, handshake)
             var currentFormat = handshake.format
@@ -85,6 +91,7 @@ class LocalSocketBridgeServer(
                             )
                         }
                         events.onPcm(message.pcm, message.sequence)
+                        BridgeWireWriter.writeAck(output, message.sequence)
                     }
                     is BridgeMessage.Format -> {
                         currentFormat = message.format

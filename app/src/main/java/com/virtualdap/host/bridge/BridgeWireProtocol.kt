@@ -4,20 +4,35 @@ import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
 import java.io.EOFException
 import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object BridgeWireProtocol {
     const val MAGIC = 0x56444150
-    const val VERSION: Short = 1
+    const val VERSION: Short = 2
     const val HANDSHAKE_BYTES = 32
     const val MESSAGE_HEADER_BYTES = 16
+    const val ACK_BYTES = 16
+    const val ACK_MAGIC = 0x56444141
     const val MAX_PAYLOAD_BYTES = 1024 * 1024
 
     const val TYPE_AUDIO = 1
     const val TYPE_FORMAT = 2
     const val TYPE_STATS = 3
     const val TYPE_PING = 4
+}
+
+object BridgeWireWriter {
+    fun writeAck(output: OutputStream, sequence: Long) {
+        val data = ByteBuffer.allocate(BridgeWireProtocol.ACK_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        data.putInt(BridgeWireProtocol.ACK_MAGIC)
+        data.putShort(BridgeWireProtocol.VERSION)
+        data.putShort(0)
+        data.putLong(sequence)
+        output.write(data.array())
+        output.flush()
+    }
 }
 
 data class BridgeHandshake(

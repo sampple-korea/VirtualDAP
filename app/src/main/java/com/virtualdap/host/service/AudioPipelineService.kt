@@ -36,8 +36,8 @@ class AudioPipelineService : Service(), BridgeEvents {
     private lateinit var audioManager: AudioManager
     private lateinit var sink: AndroidAudioSink
     private var bridge: LocalSocketBridgeServer? = null
-    private var currentFormat: PcmFormat? = null
-    private var configuredSourceFormat: PcmFormat? = null
+    @Volatile private var currentFormat: PcmFormat? = null
+    @Volatile private var configuredSourceFormat: PcmFormat? = null
     private var serviceStarted = false
     private val selfTestRunning = AtomicBoolean(false)
     private var receivedBytes = 0L

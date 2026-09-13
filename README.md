@@ -68,6 +68,7 @@ authenticated vsock proxy and product integration boundary are documented in
 - length-delimited message headers with a 1 MiB hard payload limit;
 - PCM payloads must contain complete frames;
 - explicit format-change messages and monotonic packet sequence numbers;
+- sequence-matched host submission ACKs keep at most one PCM packet in flight;
 - periodic frames/dropped-bytes/reconnect counters;
 - blocking socket and AudioTrack writes provide bounded backpressure, while reconnect attempts are
   rate-limited so AudioFlinger cannot spin when the host is unavailable.
