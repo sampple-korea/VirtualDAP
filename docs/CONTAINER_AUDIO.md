@@ -20,9 +20,11 @@ removed and no original start or write call is made. A captured OpenSL ES PCM pl
 created and realized so Android validates the source/sink and requested interfaces, but its original
 play-state and buffer-enqueue functions are never called. Per-object copies of the engine, player,
 play, buffer-queue and volume vtables redirect only the candidate player. Native allocations are
-still released normally. Unsupported compressed/native audio paths retain their original Android
-behavior and must not be reported as captured. Failure to install either native hook family does not
-disable the separate AudioTrack capture path.
+still released normally. Unsupported output formats in these three intercepted API families are
+rejected, rather than passed to ordinary Android playback. Application startup is blocked if any
+of the three hook families fails to install. Other output APIs (for example native MediaPlayer
+playback not exposing captured PCM) are not yet covered; these boundaries still need app-specific
+validation and must not be represented as universally intercepted.
 
 ## Implemented boundary
 
@@ -32,10 +34,10 @@ disable the separate AudioTrack capture path.
   implemented without expanding repeated audio in memory.
 - Java byte[], short[], float[] and direct/non-direct ByteBuffer write entry points.
 - Native AAudio PCM16, float, packed PCM24 and PCM32 output in both data-callback and blocking-write
-  modes. Input and requested non-PCM streams pass through unchanged.
+  modes. Input streams pass through unchanged; non-PCM output is rejected.
 - Native OpenSL ES Android-simple and legacy PCM buffer queues for PCM16, float, packed PCM24 and
   PCM32. Android's original CreateAudioPlayer remains the authority for accepted rates, channel masks,
-  formats and interfaces; non-PCM and non-output-mix players pass through unchanged.
+  formats and interfaces; unsupported/non-PCM player sources and sinks are rejected.
 - OpenSL ES queue capacity/count/index, Clear, STOPPED-only queue callback registration, play state,
   duration/position, marker/period/event masks, buffer callbacks, volume, mute and stereo-position
   controls. A buffer callback means the copied buffer has entered VirtualDAP's bounded transport,
@@ -110,6 +112,9 @@ Unsupported output never falls back to Android mixing.
 Instrumentation uses a separate paced test-only receiver to verify capture, pause, gain messages,
 overlap and individual release without a DAC. These observations prove container transport only.
 Official output policy and unsupported route rejection are tested separately.
+The fixture also verifies AudioTrack PCM8 write/start rejection, AAudio IEC61937 rejection and
+OpenSL PCM8 player rejection without opening a capture session or starting native playback.
+Output readiness failures are reported separately from hosted application startup failures.
 
 This does not establish all music-service compatibility. Still required are AudioTrack/OpenSL ES
 playback-speed and effect semantics, app-specific decoder/DRM/login tests and wider Android API/ABI

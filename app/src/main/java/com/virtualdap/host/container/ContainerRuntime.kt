@@ -244,7 +244,7 @@ object ContainerRuntime {
             try {
                 if (pendingLaunches[packageName] != request) return@launch
                 check(mutableState.value.applications.any { it.packageName == packageName }) { "App is not installed in the music space" }
-                withTimeout(5_000) { PipelineStore.state.first { it.enabled } }
+                MusicOutputReadiness.await(PipelineStore.state)
                 if (pendingLaunches[packageName] != request) return@launch
                 check(BlackBoxCore.get().launchApk(packageName, USER)) { "No launchable activity was found" }
                 if (previousPid != null && hostContext?.getSystemService(android.app.ActivityManager::class.java)
@@ -259,10 +259,15 @@ object ContainerRuntime {
                 pendingLaunches.remove(packageName, request)
             } catch (error: Throwable) {
                 if (pendingLaunches.remove(packageName, request)) {
-                    val message = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                    val message = if (error is MusicOutputUnavailable) {
+                        error.message ?: "Music output is unavailable"
+                    } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
                         "$packageName did not finish startup. Check app/Android/CPU compatibility and Diagnostics."
                     } else "Could not launch $packageName: ${error.message}"
-                    mutableState.update { it.copy(lastError = message, detail = "App startup failed") }
+                    mutableState.update { it.copy(
+                        lastError = message,
+                        detail = if (error is MusicOutputUnavailable) "Audio output not ready" else "App startup failed",
+                    ) }
                     PipelineStore.log(message, LogLevel.ERROR)
                 }
             }

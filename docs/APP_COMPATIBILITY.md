@@ -18,6 +18,7 @@ instrumentation uses a paced test receiver, separate from production output.
 The instrumentation APK accepts `externalApk` (a filename in the debug host's private cache) and
 `externalPackage`. This mode checks import and Application.onCreate only; it deliberately does not
 claim playback verification.
+It uses the test-only receiver so import/start checks do not require a physical official-output DAC.
 
 ```sh
 adb push /path/to/legitimately-obtained.apks /data/local/tmp/virtualdap-app.apks

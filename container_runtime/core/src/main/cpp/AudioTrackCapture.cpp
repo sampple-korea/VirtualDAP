@@ -24,6 +24,12 @@ std::atomic<uint64_t> next_epoch{1};
 
 jlong key(JNIEnv* env, jobject track) { return env->GetLongField(track, native_track); }
 
+std::shared_ptr<CapturedPcmStream> unsupported(JNIEnv* env) {
+    env->ThrowNew(env->FindClass("java/lang/UnsupportedOperationException"),
+        "VirtualDAP cannot capture this audio format; ordinary Android output fallback is disabled");
+    return nullptr;
+}
+
 std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool create = true) {
     if (!enabled) return nullptr;
     const jlong id = key(env, track);
@@ -33,7 +39,7 @@ std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool creat
     if (found != streams.end()) return found->second;
     if (!create) return nullptr;
     const jint android_data_mode = env->GetIntField(track, data_mode);
-    if (android_data_mode != 0 && android_data_mode != 1) return nullptr;
+    if (android_data_mode != 0 && android_data_mode != 1) return unsupported(env);
     const int android_encoding = env->GetIntField(track, encoding);
     virtualdap::Encoding pcm;
     unsigned bytes;
@@ -42,12 +48,13 @@ std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool creat
         case 4: pcm = virtualdap::Encoding::kPcmFloat; bytes = 4; break;
         case 21: pcm = virtualdap::Encoding::kPcm24Packed; bytes = 3; break;
         case 22: pcm = virtualdap::Encoding::kPcm32; bytes = 4; break;
-        default: return nullptr; // Compressed/PCM8 paths are not silently mislabeled captured.
+        default: return unsupported(env);
     }
     const jint rate = env->CallIntMethod(track, sample_rate);
     const jint channel_count = env->CallIntMethod(track, channels);
     const jint buffer_frames = env->CallIntMethod(track, capacity);
-    if (env->ExceptionCheck() || channel_count < 1 || channel_count > 8 || buffer_frames < 1) return nullptr;
+    if (env->ExceptionCheck()) return nullptr;
+    if (channel_count < 1 || channel_count > 8 || buffer_frames < 1) return unsupported(env);
     try {
         if (streams.size() >= 32) throw std::runtime_error("Too many simultaneous captured audio tracks");
         virtualdap::PcmConfig config{
@@ -88,18 +95,20 @@ void remove(JNIEnv* env, jobject track) {
     removed->close();
 }
 
-#define CONTROL_HOOK(name, command) \
+#define CONTROL_HOOK(name, command, create) \
     void (*original_##name)(JNIEnv*, jobject); \
     void captured_##name(JNIEnv* env, jobject object) { \
-        auto value = stream(env, object); \
+        auto value = stream(env, object, create); \
         if (env->ExceptionCheck()) return; \
         if (value) value->control(PlaybackControl::command); \
         else original_##name(env, object); \
     }
-CONTROL_HOOK(start, kPlay)
-CONTROL_HOOK(pause, kPause)
-CONTROL_HOOK(stop, kStop)
-CONTROL_HOOK(flush, kFlush)
+CONTROL_HOOK(start, kPlay, true)
+// Non-emitting controls must remain available for un-captured tracks, especially stop() invoked
+// by AudioTrack.release(). Rejecting cleanup would leak the original native handle.
+CONTROL_HOOK(pause, kPause, false)
+CONTROL_HOOK(stop, kStop, false)
+CONTROL_HOOK(flush, kFlush, false)
 
 void (*original_volume)(JNIEnv*, jobject, jfloat, jfloat);
 void captured_volume(JNIEnv* env, jobject object, jfloat left, jfloat right) {
@@ -261,16 +270,18 @@ Java_top_niunaijun_blackbox_core_AudioCapture_install(JNIEnv* env, jclass) {
 #undef INSTALL
     const bool aaudio_complete = virtualdap::install_aaudio_capture();
     const bool opensl_complete = virtualdap::install_opensl_capture();
-    enabled = complete;
+    // App startup must fail if any supported output family cannot be intercepted. Partial
+    // installation must not leave another family available as an ordinary-output escape hatch.
+    enabled = complete && aaudio_complete && opensl_complete;
     __android_log_print(complete ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "VirtualDAP-Capture",
                         "AudioTrack PCM capture hooks %s", complete ? "ready" : "unavailable");
     if (!aaudio_complete) {
         __android_log_print(ANDROID_LOG_WARN, "VirtualDAP-Capture",
-                            "AAudio capture is unavailable; AudioTrack capture remains active");
+                            "AAudio capture is unavailable; hosted app startup is blocked");
     }
     if (!opensl_complete) {
         __android_log_print(ANDROID_LOG_WARN, "VirtualDAP-Capture",
-                            "OpenSL ES capture is unavailable; AudioTrack capture remains active");
+                            "OpenSL ES capture is unavailable; hosted app startup is blocked");
     }
-    return complete ? JNI_TRUE : JNI_FALSE;
+    return enabled ? JNI_TRUE : JNI_FALSE;
 }

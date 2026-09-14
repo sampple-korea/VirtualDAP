@@ -54,14 +54,16 @@ class ContainerInstrumentedTest {
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == expected })
             if (InstrumentationRegistry.getArguments().getString("importOnly") == "true") return
-            AudioPipelineService.command(context, AudioPipelineService.ACTION_START)
-            ContainerRuntime.launch(expected)
-            await("external Application.onCreate (not a playback certification)") {
-                ContainerRuntime.state.value.applications.any { it.packageName == expected && it.lastStartedPid != null }
+            CaptureProbe().use { probe ->
+                probe.start()
+                ContainerRuntime.launch(expected)
+                await("external Application.onCreate (not a playback certification)") {
+                    ContainerRuntime.state.value.applications.any { it.packageName == expected && it.lastStartedPid != null }
+                }
             }
             return
         }
-        val capture = CaptureProbe().also { it.start() }
+        val capture = CaptureProbe()
         val fixture = File(context.cacheDir, "instrumented-music-fixture.apk")
         try {
             instrumentation.context.assets.open("music-fixture.apk").use { input ->
@@ -71,12 +73,31 @@ class ContainerInstrumentedTest {
             await("fixture installation") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == FIXTURE })
+            // No output has been started: report the real prerequisite, not a fake app timeout.
+            ContainerRuntime.launch(FIXTURE)
+            await("unsupported output prerequisite") {
+                ContainerRuntime.state.value.detail == "Audio output not ready"
+            }
+            assertTrue(ContainerRuntime.state.value.lastError.orEmpty().contains("official bit-perfect"))
+            assertEquals(null, ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid)
+            capture.start()
             ContainerRuntime.launch(FIXTURE)
             await("fixture Application.onCreate") {
                 ContainerRuntime.state.value.applications.any {
                     it.packageName == FIXTURE && it.lastStartedPid != null
                 }
             }
+            click("Check unsupported output rejection")
+            await("unsupported formats rejected inside the container") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("Unsupported output test failed:")
+                    ?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("Unsupported output rejected: AudioTrack, AAudio, OpenSL ES")
+                    ?.isNotEmpty() == true
+            }
+            assertEquals("Unsupported formats must not open a capture/output session", 0,
+                PipelineStore.state.value.connectedStreams)
             for ((button, rate, encoding) in listOf(
                 Triple("Play 48 kHz / 16-bit", 48_000, PcmEncoding.PCM_16),
                 Triple("Play 96 kHz / float", 96_000, PcmEncoding.PCM_FLOAT),

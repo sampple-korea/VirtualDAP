@@ -21,6 +21,7 @@ public final class MusicFixtureActivity extends Activity {
     private static native String playAaudioNative();
     private static native String playAaudioBlockingNative();
     private static native String playOpenSlNative();
+    private static native String rejectUnsupportedNative();
 
     private volatile boolean playing;
     private Thread audioThread;
@@ -109,12 +110,48 @@ public final class MusicFixtureActivity extends Activity {
             if (current != null) current.stop();
         });
         content.addView(stop);
+        Button unsupported = new Button(this);
+        unsupported.setText("Check unsupported output rejection");
+        unsupported.setOnClickListener(view -> checkUnsupportedOutput());
+        content.addView(unsupported);
         status = new TextView(this);
         status.setText("Idle");
         content.addView(status);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         setContentView(scroll);
+    }
+
+    private void checkUnsupportedOutput() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        try {
+            AudioTrack track = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
+                .setAudioFormat(new AudioFormat.Builder().setSampleRate(48000)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_8BIT).build())
+                .setBufferSizeInBytes(9600).setTransferMode(AudioTrack.MODE_STREAM).build();
+            try {
+                // Two silent PCM8 samples; never start the track if this write is accepted.
+                boolean writeRejected = false;
+                try { track.write(new byte[] {(byte)128, (byte)128}, 0, 2); }
+                catch (UnsupportedOperationException expected) { writeRejected = true; }
+                if (!writeRejected) throw new IllegalStateException("Unsupported AudioTrack write was accepted");
+                try {
+                    track.play();
+                    throw new IllegalStateException("Unsupported AudioTrack start was accepted");
+                } catch (UnsupportedOperationException expected) { }
+            } finally { track.release(); }
+            String nativeResult = rejectUnsupportedNative();
+            if (!"Native unsupported output rejected".equals(nativeResult)) {
+                throw new IllegalStateException(nativeResult);
+            }
+            status.setText("Unsupported output rejected: AudioTrack, AAudio, OpenSL ES");
+            android.util.Log.i("VirtualDAP-fixture", status.getText().toString());
+        } catch (Throwable error) {
+            status.setText("Unsupported output test failed: " + error);
+            android.util.Log.e("VirtualDAP-fixture", status.getText().toString(), error);
+        }
     }
 
     private void play(int sampleRate, boolean floating) {

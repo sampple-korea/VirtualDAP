@@ -329,7 +329,10 @@ aaudio_result_t captured_open_stream(AAudioStreamBuilder* builder, AAudioStream*
     {
         std::lock_guard<std::mutex> lock(registry_mutex);
         const auto found = builders.find(builder);
-        if (found == builders.end()) return original_open_stream(builder, output);
+        if (found == builders.end()) {
+            if (output) *output = nullptr;
+            return AAUDIO_ERROR_INVALID_STATE;
+        }
         builder_state = found->second;
     }
     const bool candidate = builder_state.direction == AAUDIO_DIRECTION_OUTPUT &&
@@ -337,7 +340,9 @@ aaudio_result_t captured_open_stream(AAudioStreamBuilder* builder, AAudioStream*
          supported_pcm(builder_state.requested_format));
     if (!candidate) {
         restore_callbacks(builder, builder_state);
-        return original_open_stream(builder, output);
+        if (builder_state.direction == AAUDIO_DIRECTION_INPUT) return original_open_stream(builder, output);
+        if (output) *output = nullptr;
+        return AAUDIO_ERROR_INVALID_FORMAT;
     }
     original_set_data_callback(builder, nullptr, nullptr);
     original_set_error_callback(builder, nullptr, nullptr);
@@ -356,7 +361,7 @@ aaudio_result_t captured_open_stream(AAudioStreamBuilder* builder, AAudioStream*
         original_close(native_stream);
         *output = nullptr;
         restore_callbacks(builder, builder_state);
-        return original_open_stream(builder, output);
+        return AAUDIO_ERROR_INVALID_FORMAT;
     }
 
     const uint32_t frame_size = sample_bytes * static_cast<uint32_t>(channels);

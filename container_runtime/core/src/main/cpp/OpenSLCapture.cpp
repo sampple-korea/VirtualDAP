@@ -697,9 +697,13 @@ SLresult captured_create_audio_player(
     if (!engine_state) return SL_RESULT_PRECONDITIONS_VIOLATED;
     PcmDescription description;
     const bool candidate = parse_pcm_source(source, sink, &description);
+    if (!candidate) {
+        if (player) *player = nullptr;
+        return SL_RESULT_CONTENT_UNSUPPORTED;
+    }
     const SLresult result = engine_state->original_engine_vtable->CreateAudioPlayer(
         self, player, source, sink, interface_count, interface_ids, interface_required);
-    if (result != SL_RESULT_SUCCESS || !candidate || !player || !*player) return result;
+    if (result != SL_RESULT_SUCCESS || !player || !*player) return result;
 
     const SLObjectItf native_player = *player;
     const SLObjectItf_* native_object_vtable = **player;

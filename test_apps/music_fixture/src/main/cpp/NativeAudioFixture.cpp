@@ -257,6 +257,51 @@ Java_com_virtualdap_fixture_music_MusicFixtureActivity_playAaudioBlockingNative(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_virtualdap_fixture_music_MusicFixtureActivity_rejectUnsupportedNative(JNIEnv* env, jclass) {
+    AAudioStreamBuilder* builder = nullptr;
+    AAudioStream* stream = nullptr;
+    if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) {
+        return env->NewStringUTF("Could not create AAudio rejection-test builder");
+    }
+    AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
+    AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_IEC61937);
+    const auto aaudio_result = AAudioStreamBuilder_openStream(builder, &stream);
+    const bool aaudio_rejected = aaudio_result == AAUDIO_ERROR_INVALID_FORMAT && stream == nullptr;
+    if (stream) AAudioStream_close(stream); // Never start a possibly un-intercepted stream.
+    AAudioStreamBuilder_delete(builder);
+    if (!aaudio_rejected) return env->NewStringUTF("AAudio compressed output was not explicitly rejected");
+
+    SLObjectItf engine = nullptr;
+    SLEngineItf engine_interface = nullptr;
+    SLObjectItf output_mix = nullptr;
+    SLObjectItf player = nullptr;
+    bool rejected = false;
+    do {
+        if (create_open_sl_engine(&engine) != SL_RESULT_SUCCESS) break;
+        if ((*engine)->Realize(engine, SL_BOOLEAN_FALSE) != SL_RESULT_SUCCESS) break;
+        if ((*engine)->GetInterface(engine, SL_IID_ENGINE, &engine_interface) != SL_RESULT_SUCCESS) break;
+        if ((*engine_interface)->CreateOutputMix(engine_interface, &output_mix, 0, nullptr, nullptr)
+                != SL_RESULT_SUCCESS) break;
+        if ((*output_mix)->Realize(output_mix, SL_BOOLEAN_FALSE) != SL_RESULT_SUCCESS) break;
+        SLDataLocator_AndroidSimpleBufferQueue locator{SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+        SLDataFormat_PCM format{SL_DATAFORMAT_PCM, 2, SL_SAMPLINGRATE_48,
+            SL_PCMSAMPLEFORMAT_FIXED_8, SL_PCMSAMPLEFORMAT_FIXED_8,
+            SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT, SL_BYTEORDER_LITTLEENDIAN};
+        SLDataSource source{&locator, &format};
+        SLDataLocator_OutputMix output_locator{SL_DATALOCATOR_OUTPUTMIX, output_mix};
+        SLDataSink sink{&output_locator, nullptr};
+        const SLresult result = (*engine_interface)->CreateAudioPlayer(
+            engine_interface, &player, &source, &sink, 0, nullptr, nullptr);
+        rejected = result == SL_RESULT_CONTENT_UNSUPPORTED && player == nullptr;
+    } while (false);
+    if (player) (*player)->Destroy(player); // Never realize or start a rejected-output probe.
+    if (output_mix) (*output_mix)->Destroy(output_mix);
+    if (engine) (*engine)->Destroy(engine);
+    return env->NewStringUTF(rejected ? "Native unsupported output rejected"
+        : "OpenSL unsupported PCM was not explicitly rejected");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_virtualdap_fixture_music_MusicFixtureActivity_playOpenSlNative(JNIEnv* env, jclass) {
     SLObjectItf engine = nullptr;
     SLObjectItf engine_reference = nullptr;
