@@ -56,15 +56,12 @@ class AudioSessionMixer(
         val foreground = (active.ifEmpty { sessions.values.toList() }).maxByOrNull { it.activation }
         val selected = foreground?.state
         PipelineStore.update { current ->
-            if (selected == null) current.copy(
-                guestConnected = false, guestPeer = null, sourceFormat = null, sinkFormat = null,
-                connectedStreams = 0, playingStreams = 0, bitPerfectActive = false,
-                directPlayback = false, sourcePreserved = true, latencyMs = null,
-                phase = if (current.enabled) PipelinePhase.WAITING_FOR_GUEST else PipelinePhase.STOPPED,
-            ) else selected.copy(
+            if (selected == null) PipelinePresentation.withoutStreams(current, lastOutputError)
+            else selected.copy(
                 enabled = current.enabled, availableRoutes = current.availableRoutes,
                 selectedRouteId = current.selectedRouteId, logs = current.logs,
                 lastError = lastOutputError ?: selected.lastError,
+                phase = if (active.isEmpty() && lastOutputError != null) PipelinePhase.ERROR else selected.phase,
                 connectedStreams = sessions.size, playingStreams = active.size,
                 bitPerfectActive = active.size == 1 && selected.bitPerfectActive,
                 guestDroppedBytes = sessions.values.sumOf { it.state.guestDroppedBytes },
@@ -254,8 +251,7 @@ class AudioSessionMixer(
                 PipelineStore.log(failureReason?.let { "Stream $id disconnected: $it" } ?: "Stream $id completed",
                     if (failureReason == null) LogLevel.INFO else LogLevel.WARNING)
                 if (PipelineStore.state.value.connectedStreams == 0) {
-                    if (failureReason != null) PipelineStore.update { it.copy(lastError = failureReason, phase = PipelinePhase.ERROR) }
-                    notify(if (failureReason == null) "Waiting for music" else "Audio stream needs attention")
+                    notify(if (PipelineStore.state.value.lastError == null) "Waiting for music" else "Audio stream needs attention")
                 }
             }
         }

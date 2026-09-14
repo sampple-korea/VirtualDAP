@@ -48,3 +48,7 @@ Instrumentation separates real container capture (using a paced, test-only socke
 official-output rejection tests. The receiver emits no sound and is not hardware playback evidence.
 The Diagnostics tone uses the same official output restrictions as music playback.
 Physical DAC validation is outside the current test scope.
+
+A downloadable signed APK will be published through GitHub Releases once the usable scope is
+verified. See [release readiness](docs/RELEASE_READINESS.md); development test results do not imply
+that commercial-service login or music playback is already verified.

@@ -63,7 +63,8 @@ class AudioPipelineService : Service() {
                 return
             }
             stopPipeline(false)
-            PipelineStore.update { it.copy(lastError = "Audio output disconnected. Choose an output and start playback again.") }
+            PipelineStore.update { it.copy(phase = PipelinePhase.ERROR,
+                lastError = "Audio output disconnected. Choose an output and start playback again.") }
         }
     }
     private val deviceCallback = object : AudioDeviceCallback() {
@@ -151,17 +152,13 @@ class AudioPipelineService : Service() {
         }
     }
 
-    private fun stopPipeline(stopService: Boolean) {
+    private fun stopPipeline(stopService: Boolean, preserveFailure: Boolean = false) {
         bridge?.close()
         bridge = null
         mixer?.close()
         mixer = null
         updatePlaybackWakeLock(false)
-        PipelineStore.update { it.copy(
-            enabled = false, phase = PipelinePhase.STOPPED, guestConnected = false, guestPeer = null,
-            sourceFormat = null, sinkFormat = null, bitPerfectActive = false, directPlayback = false,
-            sourcePreserved = true, connectedStreams = 0, playingStreams = 0, latencyMs = null,
-        ) }
+        PipelineStore.update { PipelinePresentation.stopped(it, preserveFailure) }
         PipelineStore.log("Audio pipeline stopped")
         if (serviceStarted) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -204,7 +201,8 @@ class AudioPipelineService : Service() {
                     stopDsd("Selected output disconnected; DSD playback was stopped without falling back to a speaker")
                 } else {
                     stopPipeline(false)
-                    PipelineStore.update { it.copy(lastError = "Selected output disconnected. Playback stopped to avoid switching to a speaker.") }
+                    PipelineStore.update { it.copy(phase = PipelinePhase.ERROR,
+                        lastError = "Selected output disconnected. Playback stopped to avoid switching to a speaker.") }
                 }
             } else mixer?.selectRoute(selected)
         }
@@ -266,7 +264,7 @@ class AudioPipelineService : Service() {
     @android.annotation.SuppressLint("WakelockTimeout")
     private fun updatePlaybackWakeLock(active: Boolean) {
         if (active) {
-            // USB bypasses AudioFlinger's wake lock. Hold ours only while a track is active;
+            // Keep playback workers alive only while a track is active;
             // pause, disconnect, explicit stop, destruction and process death release it.
             val lock = playbackWakeLock ?: getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VirtualDAP:AudioPlayback")
@@ -288,7 +286,7 @@ class AudioPipelineService : Service() {
         scope.cancel()
         unregisterReceiver(noisyReceiver)
         audioManager.unregisterAudioDeviceCallback(deviceCallback)
-        stopPipeline(false)
+        stopPipeline(false, preserveFailure = true)
         routes.close()
         super.onDestroy()
     }
