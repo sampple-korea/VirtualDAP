@@ -8,6 +8,7 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
 | VirtualDAP fixture, API 34 minimum / official-output build | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified base, split update and device-targeted APKS | Verified, including feature-only class | Paced test receiver: Java streaming/static, AAudio callback/write, OpenSL ES, controls, overlapping capture and individual release; **not DAC output** |
 | YouTube Music 8.09.50, version code 80950280, x86_64 | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified copying the installed host base/split package into the container | Application.onCreate callback verified; subsequent visible sign-in-screen check **fails** | Not tested; login, DRM, UI navigation and music playback remain unverified |
+| foobar2000 mobile 2.25.9, version code 1093, official x86_64 APK | API 36 Google APIs x86_64, ordinary UID | Verified APK import | Application.onCreate and the visible welcome screen verified, including resumed-activity and live-process evidence | Not tested; a welcome screen is not playback verification |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
 The current minimum is API 34. The output policy now requires an officially supported bit-perfect
@@ -67,6 +68,27 @@ The fixture verifies that the bound control service remains below cached importa
 app stops, then performs the real split update. The combined account-adapter and lifetime changes
 passed 12 local API 36 tests in 52.806 seconds, debug build/lint, 98 JVM tests, prepared-source checks
 and the APK boundary check. This is fixture/control evidence, not commercial-service certification.
+GitHub run `34865313353` passed the host debug/release build and both API 34/36 runtime jobs for
+commit `04aa48c`. This precedes the activity-lifecycle evidence changes below.
+
+## Visible activity evidence
+
+The official foobar2000 APK used for the local check was downloaded from the publisher's
+`foobar2000.org/downloads/foobar2000-mobile-v2.25.9-x86_64.apk` distribution, without modification.
+Its verified signing-certificate SHA-256 is
+`7cc027cf34f77977aaa7543a3390d293212fd75ab306de6898e61528f99a82b5`.
+The welcome-screen smoke passed (1 test, 26 seconds, rounded). No login controls or personal media
+were used. This establishes an independently distributed app's visible startup, not audio capture.
+
+On this emulator, accessibility reports the container's real host package on the app's window.
+A package-label check alone therefore rejected a visibly rendered screen. The optional UI smoke
+now combines the expected app's resumed-activity callback, a live process, and an exact visible
+non-password label. Lifecycle reports are accepted only from the same UID with the actual calling
+PID; each activity instance has its own identity, so a late pause cannot clear its successor.
+Explicit app stop clears that app's activity evidence. Neither these callbacks nor a host-package
+accessibility label on its own constitutes a successful app-screen test.
+After the stop-state reduction and regression tests were added, the local debug build/lint,
+103 JVM tests and all 12 API 36 instrumentation tests passed (48.739 seconds for instrumentation).
 
 ## Optional local compatibility smoke
 
@@ -74,8 +96,10 @@ The instrumentation APK accepts `externalApk` (a filename in the debug host's pr
 `externalPackage`. This mode checks import and Application.onCreate only; it deliberately does not
 claim playback verification.
 It uses the test-only receiver so import/start checks do not require a physical official-output DAC.
-Optional `externalUiText` additionally requires an exact, visible accessibility label belonging to
-the imported package to remain on screen for three seconds after initialization. This distinguishes
+Optional `externalUiText` additionally requires an exact, visible accessibility label, a resumed
+activity from the imported app and its live process for three seconds after initialization.
+The node package may be the app or the real host, because container windows can report host IDs.
+This distinguishes
 an actual app screen from the host launcher or a startup callback preceding a crash. It does not
 click login controls, submit credentials or establish playback compatibility. Choose the label for
 the app version and emulator locale being tested.

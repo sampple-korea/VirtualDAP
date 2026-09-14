@@ -68,10 +68,26 @@ class ContainerInstrumentedTest {
                 InstrumentationRegistry.getArguments().getString("externalUiText")?.let { expectedText ->
                     require(expectedText.isNotBlank() && expectedText.length <= 200)
                     val ui = instrumentation.uiAutomation
+                    var previousDiagnostic: String? = null
                     fun visibleAppScreen(): Boolean {
+                        val foreground = ContainerRuntime.state.value.foregroundActivity ?: return false
+                        if (foreground.packageName != expected) return false
+                        val manager = context.getSystemService(android.app.ActivityManager::class.java)
+                        if (manager.runningAppProcesses.orEmpty().none { it.pid == foreground.pid }) return false
                         val root = ui.rootInActiveWindow ?: return false
-                        return root.findAccessibilityNodeInfosByText(expectedText).any {
-                            it.packageName?.toString() == expected && it.isVisibleToUser &&
+                        val candidates = root.findAccessibilityNodeInfosByText(expectedText)
+                        // Log only the requested label's structural match, never account text or
+                        // arbitrary contents of the screen. Container windows may report host IDs.
+                        val diagnostic = "rootPackage=${root.packageName}; matches=" + candidates.joinToString {
+                            "package=${it.packageName}, visible=${it.isVisibleToUser}, " +
+                                "exact=${!it.isPassword && it.text?.toString() == expectedText}"
+                        }
+                        if (diagnostic != previousDiagnostic) {
+                            android.util.Log.i("VirtualDAP-Compat", diagnostic)
+                            previousDiagnostic = diagnostic
+                        }
+                        return candidates.any {
+                            it.packageName?.toString() in setOf(expected, context.packageName) && it.isVisibleToUser &&
                                 !it.isPassword && it.text?.toString() == expectedText
                         }
                     }
@@ -110,6 +126,9 @@ class ContainerInstrumentedTest {
                 ContainerRuntime.state.value.applications.any {
                     it.packageName == FIXTURE && it.lastStartedPid != null
                 }
+            }
+            await("fixture resumed activity lifecycle") {
+                ContainerRuntime.state.value.foregroundActivity?.packageName == FIXTURE
             }
             click("Check unsupported output rejection")
             await("ordinary-UID MediaRouter2 discovery") {

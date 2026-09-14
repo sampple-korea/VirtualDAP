@@ -48,7 +48,25 @@ data class ContainerSnapshot(
     val detail: String = "Preparing the music space",
     val lastError: String? = null,
     val hostApplications: List<ContainerApp> = emptyList(),
-)
+    val foregroundActivity: ContainerActivity? = null,
+) {
+    internal fun activityChanged(activity: ContainerActivity, resumed: Boolean): ContainerSnapshot = when {
+        applications.none { it.packageName == activity.packageName } -> this
+        resumed -> copy(foregroundActivity = activity)
+        foregroundActivity == activity -> copy(foregroundActivity = null)
+        else -> this // A late pause must not clear the successor activity.
+    }
+
+    internal fun appStopped(packageName: String) = copy(
+        detail = "Stopped $packageName",
+        applications = applications.map { app ->
+            if (app.packageName == packageName) app.copy(lastStartedPid = null) else app
+        },
+        foregroundActivity = foregroundActivity?.takeUnless { it.packageName == packageName },
+    )
+}
+
+data class ContainerActivity(val packageName: String, val pid: Int, val identity: String, val className: String)
 
 /** Ordinary-UID application container sharing the host Android framework. */
 object ContainerRuntime {
@@ -109,6 +127,9 @@ object ContainerRuntime {
                     application: Application,
                     userId: Int,
                 ) {
+                    application.registerActivityLifecycleCallbacks(
+                        ContainerActivityReporter(context, hostPackage, packageName),
+                    )
                     val extras = Bundle().apply {
                         putInt("pid", Process.myPid())
                         putString("process", processName)
@@ -332,14 +353,7 @@ object ContainerRuntime {
         scope.launch {
             try {
                 BlackBoxCore.get().stopPackage(packageName, USER)
-                mutableState.update {
-                    it.copy(
-                        detail = "Stopped $packageName",
-                        applications = it.applications.map { app ->
-                            if (app.packageName == packageName) app.copy(lastStartedPid = null) else app
-                        },
-                    )
-                }
+                mutableState.update { it.appStopped(packageName) }
             } catch (error: Throwable) {
                 mutableState.update { it.copy(lastError = "Could not stop $packageName: ${error.message}") }
             }
@@ -357,6 +371,10 @@ object ContainerRuntime {
             )
         }
         PipelineStore.log("Container app created: $packageName (pid $pid)")
+    }
+
+    fun activityChanged(activity: ContainerActivity, resumed: Boolean) {
+        mutableState.update { it.activityChanged(activity, resumed) }
     }
 
     private fun loadApplications() {

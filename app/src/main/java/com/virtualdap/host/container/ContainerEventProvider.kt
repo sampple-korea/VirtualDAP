@@ -14,10 +14,16 @@ class ContainerEventProvider : ContentProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         check(Binder.getCallingUid() == Process.myUid()) { "Foreign container event caller" }
-        if (method == "started" && !arg.isNullOrBlank()) {
+        if (method in setOf("started", "activity-resumed", "activity-paused") && !arg.isNullOrBlank()) {
             val pid = extras?.getInt("pid", -1) ?: -1
-            require(pid > 0 && arg.length <= 255) { "Invalid container lifecycle event" }
-            ContainerRuntime.appStarted(arg, pid)
+            require(pid > 0 && pid == Binder.getCallingPid() && arg.length <= 255) { "Invalid container lifecycle event" }
+            if (method == "started") ContainerRuntime.appStarted(arg, pid)
+            else {
+                val identity = extras?.getString("identity").orEmpty()
+                val activity = extras?.getString("activity").orEmpty()
+                require(identity.length in 1..64 && activity.length in 1..512) { "Invalid activity event" }
+                ContainerRuntime.activityChanged(ContainerActivity(arg, pid, identity, activity), method == "activity-resumed")
+            }
         }
         return Bundle.EMPTY
     }
