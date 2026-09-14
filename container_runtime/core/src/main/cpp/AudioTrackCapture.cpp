@@ -10,6 +10,7 @@
 
 namespace {
 using virtualdap::CapturedPcmStream;
+using virtualdap::CapturedDataMode;
 using virtualdap::PlaybackControl;
 std::atomic<bool> enabled{false};
 std::mutex registry_mutex;
@@ -28,7 +29,9 @@ std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool creat
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto found = streams.find(id);
     if (found != streams.end()) return found->second;
-    if (!create || env->GetIntField(track, data_mode) != 1) return nullptr; // MODE_STREAM
+    if (!create) return nullptr;
+    const jint android_data_mode = env->GetIntField(track, data_mode);
+    if (android_data_mode != 0 && android_data_mode != 1) return nullptr;
     const int android_encoding = env->GetIntField(track, encoding);
     virtualdap::Encoding pcm;
     unsigned bytes;
@@ -37,7 +40,7 @@ std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool creat
         case 4: pcm = virtualdap::Encoding::kPcmFloat; bytes = 4; break;
         case 21: pcm = virtualdap::Encoding::kPcm24Packed; bytes = 3; break;
         case 22: pcm = virtualdap::Encoding::kPcm32; bytes = 4; break;
-        default: return nullptr; // Static/compressed/PCM8 paths are not silently mislabeled captured.
+        default: return nullptr; // Compressed/PCM8 paths are not silently mislabeled captured.
     }
     const jint rate = env->CallIntMethod(track, sample_rate);
     const jint channel_count = env->CallIntMethod(track, channels);
@@ -50,11 +53,15 @@ std::shared_ptr<CapturedPcmStream> stream(JNIEnv* env, jobject track, bool creat
             bytes * static_cast<unsigned>(channel_count), 0, next_epoch++,
         };
         auto captured = CapturedPcmStream::create(config, std::min(
-            static_cast<size_t>(buffer_frames), size_t(8 * 1024 * 1024 / config.frame_size)));
+            static_cast<size_t>(buffer_frames), size_t(8 * 1024 * 1024 / config.frame_size)),
+            virtualdap::kDefaultSocketName,
+            android_data_mode == 0 ? CapturedDataMode::kStatic : CapturedDataMode::kStream);
         streams.emplace(id, captured);
         auto gain = volumes.find(id);
         if (gain != volumes.end()) captured->set_volume(gain->second.first, gain->second.second);
-        __android_log_print(ANDROID_LOG_INFO, "VirtualDAP-Capture", "PCM track %lld: %d Hz, %d ch, encoding %d",
+        __android_log_print(ANDROID_LOG_INFO, "VirtualDAP-Capture",
+                            "%s PCM track %lld: %d Hz, %d ch, encoding %d",
+                            android_data_mode == 0 ? "Static" : "Streaming",
                             static_cast<long long>(id), rate, channel_count, android_encoding);
         return captured;
     } catch (const std::exception& error) {
@@ -138,6 +145,30 @@ jint captured_timestamp(JNIEnv* env, jobject object, jlongArray output) {
     return env->ExceptionCheck() ? -2 : 0;
 }
 
+jint (*original_reload_static)(JNIEnv*, jobject);
+jint captured_reload_static(JNIEnv* env, jobject object) {
+    auto value = stream(env, object);
+    if (env->ExceptionCheck()) return -3;
+    return value && value->is_static() ? value->reload_static() : original_reload_static(env, object);
+}
+
+jint (*original_set_position)(JNIEnv*, jobject, jint);
+jint captured_set_position(JNIEnv* env, jobject object, jint position) {
+    auto value = stream(env, object);
+    if (env->ExceptionCheck()) return -3;
+    if (!value || !value->is_static()) return original_set_position(env, object, position);
+    return position < 0 ? -2 : value->set_static_position(static_cast<size_t>(position));
+}
+
+jint (*original_set_loop)(JNIEnv*, jobject, jint, jint, jint);
+jint captured_set_loop(JNIEnv* env, jobject object, jint start, jint end, jint count) {
+    auto value = stream(env, object);
+    if (env->ExceptionCheck()) return -3;
+    if (!value || !value->is_static()) return original_set_loop(env, object, start, end, count);
+    if (start < 0 || end < 0) return -2;
+    return value->set_static_loop(static_cast<size_t>(start), static_cast<size_t>(end), count);
+}
+
 template<typename Array, typename Element>
 jint array_write(JNIEnv* env, jobject object, Array input, jint offset, jint size, jboolean blocking,
                  void (JNIEnv::*read)(Array, jsize, jsize, Element*)) {
@@ -145,7 +176,8 @@ jint array_write(JNIEnv* env, jobject object, Array input, jint offset, jint siz
     if (env->ExceptionCheck()) return -3;
     if (!value) return INT32_MIN;
     if (!input || offset < 0 || size < 0 || offset > env->GetArrayLength(input) - size) return -2;
-    const size_t bytes = std::min(static_cast<size_t>(size), size_t(1024 * 1024) / sizeof(Element)) * sizeof(Element);
+    const size_t requested = static_cast<size_t>(size) * sizeof(Element);
+    const size_t bytes = std::min(requested, value->maximum_write_bytes());
     const size_t count = (bytes - bytes % value->frame_size()) / sizeof(Element);
     if (count == 0) return 0;
     std::vector<Element> samples(count);
@@ -175,8 +207,10 @@ jint captured_buffer(JNIEnv* env, jobject object, jobject buffer, jint offset, j
     const auto bytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(buffer));
     const jlong length = env->GetDirectBufferCapacity(buffer);
     if (!bytes || offset < 0 || size < 0 || static_cast<jlong>(offset) + size > length) return -2;
-    return value->write(bytes + offset, static_cast<size_t>(size) -
-                        static_cast<size_t>(size) % value->frame_size(), blocking);
+    size_t byte_count = static_cast<size_t>(size);
+    if (value->is_static()) byte_count = std::min(byte_count, value->maximum_write_bytes());
+    byte_count -= byte_count % value->frame_size();
+    return value->write(bytes + offset, byte_count, blocking);
 }
 }
 
@@ -214,6 +248,9 @@ Java_top_niunaijun_blackbox_core_AudioCapture_install(JNIEnv* env, jclass) {
     INSTALL(finalize, "native_finalize", "()V")
     INSTALL(position, "native_get_position", "()I")
     INSTALL(timestamp, "native_get_timestamp", "([J)I")
+    INSTALL(reload_static, "native_reload_static", "()I")
+    INSTALL(set_position, "native_set_position", "(I)I")
+    INSTALL(set_loop, "native_set_loop", "(III)I")
     INSTALL(bytes, "native_write_byte", "([BIIIZ)I")
     INSTALL(shorts, "native_write_short", "([SIIIZ)I")
     INSTALL(floats, "native_write_float", "([FIIIZ)I")

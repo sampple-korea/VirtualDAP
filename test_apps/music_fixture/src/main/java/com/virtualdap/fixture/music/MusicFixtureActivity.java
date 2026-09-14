@@ -5,6 +5,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -47,6 +48,10 @@ public final class MusicFixtureActivity extends Activity {
         pcmFloat.setText("Play 96 kHz / float");
         pcmFloat.setOnClickListener(view -> play(96000, true));
         content.addView(pcmFloat);
+        Button pcmStatic = new Button(this);
+        pcmStatic.setText("Play 44.1 kHz / static loop");
+        pcmStatic.setOnClickListener(view -> playStatic());
+        content.addView(pcmStatic);
         Button overlap = new Button(this);
         overlap.setText("Overlap two tracks");
         overlap.setOnClickListener(view -> playOverlap());
@@ -161,6 +166,66 @@ public final class MusicFixtureActivity extends Activity {
             .setTransferMode(AudioTrack.MODE_STREAM).build();
         track.setStartThresholdInFrames(rate / 100);
         return track;
+    }
+
+    private void playStatic() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        playing = true;
+        audioThread = new Thread(() -> {
+            AudioTrack track = null;
+            try {
+                final int rate = 44100;
+                final int bufferFrames = rate / 10;
+                final int loopCount = 9;
+                short[] samples = new short[bufferFrames * 2];
+                for (int frame = 0; frame < bufferFrames; ++frame) {
+                    short value = (short) (0.05 * 32767 * Math.sin(2 * Math.PI * 523.25 * frame / rate));
+                    samples[frame * 2] = value;
+                    samples[frame * 2 + 1] = value;
+                }
+                track = new AudioTrack.Builder()
+                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                    .setBufferSizeInBytes(samples.length * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC).build();
+                activeTrack = track;
+                int written = track.write(samples, 0, samples.length, AudioTrack.WRITE_BLOCKING);
+                if (written != samples.length) throw new IllegalStateException("Static write: " + written);
+                if (track.reloadStaticData() != AudioTrack.SUCCESS) {
+                    throw new IllegalStateException("Static reload rejected");
+                }
+                if (track.setPlaybackHeadPosition(0) != AudioTrack.SUCCESS) {
+                    throw new IllegalStateException("Static position rejected");
+                }
+                if (track.setLoopPoints(0, bufferFrames, loopCount) != AudioTrack.SUCCESS) {
+                    throw new IllegalStateException("Static loop rejected");
+                }
+                track.play();
+                final long expectedFrames = (long) bufferFrames * (loopCount + 1);
+                final long deadline = SystemClock.elapsedRealtime() + 5000;
+                while (playing && Integer.toUnsignedLong(track.getPlaybackHeadPosition()) < expectedFrames &&
+                       SystemClock.elapsedRealtime() < deadline) {
+                    SystemClock.sleep(10);
+                }
+                long observed = Integer.toUnsignedLong(track.getPlaybackHeadPosition());
+                if (playing && observed < expectedFrames) {
+                    throw new IllegalStateException("Static playback head stopped at " + observed);
+                }
+                SystemClock.sleep(300); // Leave a deterministic observation window for instrumentation.
+                if (playing) track.stop();
+                runOnUiThread(() -> status.setText("Static loop finished at " + observed + " frames"));
+            } catch (Exception error) {
+                runOnUiThread(() -> status.setText("STATIC ERROR: " + error));
+            } finally {
+                playing = false;
+                activeTrack = null;
+                if (track != null) track.release();
+            }
+        }, "VirtualDAP-fixture-static");
+        audioThread.start();
     }
 
     private void playOverlap() {

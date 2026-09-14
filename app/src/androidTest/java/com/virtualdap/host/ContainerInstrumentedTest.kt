@@ -103,6 +103,14 @@ class ContainerInstrumentedTest {
                 click("Stop")
                 await("captured track release") { !PipelineStore.state.value.guestConnected }
             }
+            click("Play 44.1 kHz / static loop")
+            await("captured static AudioTrack loop") {
+                val audio = PipelineStore.state.value
+                audio.guestConnected && audio.sourceFormat?.sampleRate == 44_100 &&
+                    audio.sourceFormat.encoding == PcmEncoding.PCM_16 && audio.framesReceived >= 44_100
+            }
+            assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+            await("static track release") { !PipelineStore.state.value.guestConnected }
             click("Overlap two tracks")
             await("two independently playing PCM streams") {
                 val audio = PipelineStore.state.value

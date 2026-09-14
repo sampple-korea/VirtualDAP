@@ -53,7 +53,8 @@ It requests no network, microphone or storage permissions.
 
 ## Not yet verified or complete
 
-Java streaming PCM interception is now implemented; see [its scope and protocol](../docs/CONTAINER_AUDIO.md).
+Java streaming and static PCM interception is now implemented; see
+[its scope and protocol](../docs/CONTAINER_AUDIO.md).
 Independent overlapping tracks, source formats and individual release are exercised on API 33/36.
 Streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
 sample-aligned gapless transitions and broader split-delivery-format coverage still require implementation and

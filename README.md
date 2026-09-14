@@ -15,9 +15,10 @@ route.
 
 ## Audio bridge
 
-The host socket receiver, output pipeline and the consumer container's Java streaming AudioTrack
-interception are implemented and tested with a fixture app. See the [capture scope](docs/CONTAINER_AUDIO.md)
-for verified behavior and remaining native/static/concurrent paths. The older full-OS reference captures at its
+The host socket receiver, output pipeline and the consumer container's Java streaming/static
+`AudioTrack` interception are implemented and tested with a fixture app. See the
+[capture scope](docs/CONTAINER_AUDIO.md) for verified behavior and remaining native/effect paths.
+The older full-OS reference captures at its
 Audio HAL boundary; that reference does not make container capture complete.
 
 The existing Android 13 guest HAL reference offers a normal mixed route for mainstream services and direct PCM profiles for

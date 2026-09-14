@@ -1,21 +1,25 @@
 # Container AudioTrack transport
 
-The consumer container intercepts decoded Java `AudioTrack` streaming PCM in its application
-process, before the hosted Application is constructed. Native registration uses the source-built
-container hook engine. No system binary, root service or host-wide audio-capture permission is used.
+The consumer container intercepts decoded Java `AudioTrack` streaming and static PCM in its
+application process, before the hosted Application is constructed. Native registration uses the
+source-built container hook engine. No system binary, root service or host-wide audio-capture
+permission is used.
 
 ```text
-hosted AudioTrack.write → bounded native packet queue → private Unix socket
+hosted AudioTrack.write → bounded streaming queue / static buffer iterator → private Unix socket
                        → host AudioPipelineService → real host AudioTrack → output route
 ```
 
 The intercepted track's original native output is not started or written, so playback is not
-duplicated. Its native allocation is still released normally. Unsupported static/compressed/native
-audio paths retain their original Android behavior and must not be reported as captured.
+duplicated. Its native allocation is still released normally. Unsupported compressed/native audio
+paths retain their original Android behavior and must not be reported as captured.
 
 ## Implemented boundary
 
 - Streaming PCM16, packed PCM24, PCM32 and float, 1–8 channels, within the bridge's 8–768 kHz range.
+- Static PCM uses the AudioTrack capacity as a zero-initialized, overwrite-from-start shared buffer.
+  Playback-head positioning, reload, disabled/finite/infinite loop points and immediate stop are
+  implemented without expanding repeated audio in memory.
 - Java byte[], short[], float[] and direct/non-direct ByteBuffer write entry points.
 - Prebuffer before play; blocking backpressure and non-blocking partial writes.
 - Play, pause, flush while paused, resume, draining stop, release and finalization.
@@ -25,11 +29,12 @@ audio paths retain their original Android behavior and must not be reported as c
 - Source bytes are neither re-encoded nor mixed in the container bridge. Any required host-format
   conversion is separately reported by the output pipeline.
 
-The per-track queue is bounded by the original AudioTrack capacity, capped at 8 MiB. The worker sends
-at most a 10 ms PCM packet at a time; the in-flight packet counts against the queue limit. Controls
-have their own bounded queue and precede the next PCM packet. Pause can therefore take effect after
-the current bounded submission rather than waiting behind the entire prebuffer. Guest callbacks
-never hold JNI array pins while doing a blocking output write.
+The streaming queue and static buffer are each bounded by the original AudioTrack capacity, capped
+at 8 MiB. The worker sends at most a 10 ms PCM packet at a time; a streaming in-flight packet counts
+against its queue limit, while a static finite or infinite loop is generated incrementally from the
+single retained buffer. Controls have their own bounded queue and precede the next PCM packet. Pause
+can therefore take effect after the current bounded submission rather than waiting behind the entire
+prebuffer or loop. Guest callbacks never hold JNI array pins while doing a blocking output write.
 
 ## Protocol 3
 
@@ -55,10 +60,13 @@ filter. Hardware latency beyond Android's playback head is not claimed measured.
 
 ## Evidence and remaining work
 
-The independent fixture APK runs inside ordinary-UID API 33/36 x86_64 emulators and emits 48 kHz
-PCM16 and 96 kHz float. Instrumentation verifies reception at the host output, source formats,
-mute/unity gain, pause/resume and no reported drops. The host C++ test checks exact packet bytes, bounded prebuffering,
-flush discard, volume controls, playback position and worker cleanup.
+The independent fixture APK runs inside ordinary-UID API 33/36 x86_64 emulators and emits streaming
+48 kHz PCM16, streaming 96 kHz float, and a finite-loop 44.1 kHz static PCM16 buffer.
+Instrumentation verifies reception at the host output, source formats, static reload/position/loop
+entry points, mute/unity gain, pause/resume and no reported drops. The host C++ test checks exact
+streaming and static packet bytes, bounded prebuffering, finite/infinite loop generation, seek,
+reload, immediate static stop, streaming drain, volume controls, playback position and worker
+cleanup.
 
 The receiver now accepts up to 16 independent streams, each with its own output track, format,
 backpressure, controls and playback-head observations. Android mixes overlapping tracks, and the
@@ -72,8 +80,8 @@ crossfade timing across independent hardware tracks. Bit-perfect mode is not aut
 mid-track after overlap; a new exact-format track can request it again.
 
 This does not establish all music-service compatibility. Still required are AudioTrack
-playback-speed/effect semantics, static AudioTrack, AAudio/OpenSL ES, app-specific decoder/DRM/login
-tests and wider Android API/ABI runtime coverage.
+playback-speed/effect semantics, AAudio/OpenSL ES, app-specific decoder/DRM/login tests and wider
+Android API/ABI runtime coverage.
 An opt-in exclusive USB PCM transport is now integrated; see [USB output](USB_OUTPUT.md).
 Its single-stream and hardware-validation limits remain distinct from Android's mixed output path.
 Streaming apps remain PCM sources at this capture boundary. Local DSF/DSDIFF playback has a
