@@ -949,7 +949,8 @@ private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit
                         Text(
                             device.profiles.take(8).joinToString("\n") {
                                 "${it.channelCount} ch · ${it.bitResolution}-bit / ${it.subslotBytes}-byte slots · alt ${it.alternateSetting}" +
-                                    if (it.rawData) " · raw-data candidate (not confirmed DSD)" else ""
+                                    if (it.nativeDsd != null) " · native DSD layout (reference-qualified)"
+                                    else if (it.rawData) " · raw data (DSD not qualified)" else ""
                             },
                             style = MaterialTheme.typography.bodySmall, color = Muted,
                         )

@@ -113,7 +113,7 @@ object UsbHostController {
                     ?: error("USB device was disconnected")
                 check(usb.hasPermission(device)) { "Grant USB access first" }
                 val connection = usb.openDevice(device) ?: error("Could not open the permitted USB device")
-                val profiles = try { UsbAudioDescriptors.parse(connection.rawDescriptors) } finally { connection.close() }
+                val profiles = try { UsbDsdDeviceRules.parseQualified(connection.rawDescriptors) } finally { connection.close() }
                 stateRef.update { snapshot -> snapshot.copy(
                     devices = snapshot.devices.map { if (it.id == deviceId) it.copy(permission = true, profiles = profiles) else it },
                     busy = false,
@@ -138,7 +138,7 @@ object UsbHostController {
             connection = usb.openDevice(device) ?: error("Could not open the permitted USB device")
             val activeConfig = ByteArray(1)
             check(connection.controlTransfer(0x80, 8, 0, 0, activeConfig, 1, 1000) == 1) { "Could not read the active USB configuration" }
-            val profile = choose(UsbAudioDescriptors.parse(connection.rawDescriptors).filter {
+            val profile = choose(UsbDsdDeviceRules.parseQualified(connection.rawDescriptors).filter {
                 it.configuration == (activeConfig[0].toInt() and 0xff)
             })
             val opened = connection

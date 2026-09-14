@@ -29,6 +29,8 @@ data class UsbAudioStreamingProfile(
     val clockEntity: Int?,
     val rates: List<UsbSampleRateRange>,
     val endpointFrequencyControl: Boolean,
+    val nativeDsd: com.virtualdap.host.audio.NativeDsdLayout? = null,
+    val dsdQualification: String? = null,
 ) {
     val frameBytes: Int get() = channelCount * subslotBytes
 }

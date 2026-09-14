@@ -9,7 +9,10 @@ data class DsdFormat(
     val bitOrder: DsdBitOrder = DsdBitOrder.MSB_FIRST,
 ) {
     init {
-        require(sampleRate in setOf(2_822_400, 5_644_800, 11_289_600, 22_579_200, 45_158_400)) {
+        require(sampleRate in setOf(
+            2_822_400, 5_644_800, 11_289_600, 22_579_200, 45_158_400,
+            3_072_000, 6_144_000, 12_288_000, 24_576_000, 49_152_000,
+        )) {
             "Unsupported DSD rate: $sampleRate"
         }
         require(channelCount in 1..8) { "Invalid DSD channel count" }
@@ -36,6 +39,7 @@ class DopEncoder(
     private var marker = 0x05
 
     fun encode(interleavedDsd: ByteArray): ByteArray {
+        require(interleavedDsd.size <= 1024 * 1024) { "DSD packet exceeds the size limit" }
         require(interleavedDsd.size % format.channelCount == 0) {
             "DSD packet contains an incomplete interleaved channel frame"
         }
@@ -69,6 +73,43 @@ class DopEncoder(
         DsdBitOrder.MSB_FIRST -> byte
         DsdBitOrder.LSB_FIRST -> (Integer.reverse(byte.toInt() and 0xff) ushr 24).toByte()
     }
+}
+
+enum class DsdWordOrder { BIG_ENDIAN, LITTLE_ENDIAN }
+
+data class NativeDsdLayout(val wordBytes: Int, val wordOrder: DsdWordOrder, val bitOrder: DsdBitOrder) {
+    init { require(wordBytes in setOf(1, 2, 4)) }
+}
+
+/** Groups chronological DSD bytes into explicitly negotiated per-channel words, without DSP. */
+class NativeDsdEncoder(private val format: DsdFormat, val layout: NativeDsdLayout) {
+    private var pending = ByteArray(0)
+    val transportRate: Int = format.sampleRate / (8 * layout.wordBytes)
+
+    fun encode(input: ByteArray): ByteArray {
+        require(input.size <= 1024 * 1024 && input.size % format.channelCount == 0) {
+            "Invalid interleaved DSD packet"
+        }
+        val combined = if (pending.isEmpty()) input else pending + input
+        val frameBytes = layout.wordBytes * format.channelCount
+        val complete = combined.size / frameBytes * frameBytes
+        val output = ByteArray(complete)
+        var destination = 0
+        for (frame in 0 until complete / frameBytes) {
+            repeat(format.channelCount) { channel ->
+                repeat(layout.wordBytes) { byte ->
+                    val temporal = if (layout.wordOrder == DsdWordOrder.BIG_ENDIAN) byte else layout.wordBytes - 1 - byte
+                    val sample = combined[frame * frameBytes + temporal * format.channelCount + channel]
+                    output[destination++] = if (format.bitOrder == layout.bitOrder) sample
+                        else (Integer.reverse(sample.toInt() and 0xff) ushr 24).toByte()
+                }
+            }
+        }
+        pending = combined.copyOfRange(complete, combined.size)
+        return output
+    }
+
+    fun finish() { check(pending.isEmpty()) { "DSD source ends with an incomplete native transport word" } }
 }
 
 enum class DsdOutputMode { NATIVE_DSD, DOP, PCM_CONVERSION }
