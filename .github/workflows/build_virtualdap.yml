@@ -113,10 +113,7 @@ jobs:
             adb shell id
             adb install -r built/app/build/outputs/apk/debug/app-debug.apk
             adb install -r built/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            if ! adb shell am instrument -w -r com.virtualdap.host.test/androidx.test.runner.AndroidJUnitRunner > instrumentation.txt; then
-              cat instrumentation.txt
-              exit 1
-            fi
+            adb shell am instrument -w -r com.virtualdap.host.test/androidx.test.runner.AndroidJUnitRunner > instrumentation.txt
             cat instrumentation.txt
             grep -Eq '^OK \([1-9][0-9]* tests?\)\r?$' instrumentation.txt
             if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' instrumentation.txt; then
