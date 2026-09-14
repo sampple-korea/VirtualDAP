@@ -12,6 +12,9 @@ captures/
 .cxx/
 *.apk
 *.aab
+# Release signing identities must be kept outside the repository.
+*.jks
+*.keystore
 *.so
 guest_system.img
 mod_package.zip

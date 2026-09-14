@@ -2,6 +2,9 @@
     >
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Normal install-time permission for Google-backed music apps' service configuration.
+         The OS/provider still enforce access; no account or signature permissions are copied. -->
+    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

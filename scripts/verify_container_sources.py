@@ -12,6 +12,17 @@ APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_media_routes_use_only_real_caller_attribution(self):
+        proxy = (JAVA / "fake/service/IMediaRouterServiceProxy.java").read_text()
+        block = proxy.split('public static class GetSystemRoutes extends MethodHook {', 1)[1]
+        block = block.split('@ProxyMethod("registerClientAsUser")', 1)[0]
+        self.assertIn('args != null && args.length > 0', block)
+        self.assertIn('guest.equals(args[0])', block)
+        self.assertIn('args[0] = top.niunaijun.blackbox.BlackBoxCore.getHostPkg()', block)
+        self.assertNotIn('args[1] =', block)
+        self.assertIn('return method.invoke(who, args)', block)
+        self.assertNotIn('catch', block)
+
     def test_no_external_crash_submission(self):
         sender = (JAVA / "utils/LogSender.java").read_text()
         self.assertNotIn("http", sender)

@@ -60,6 +60,25 @@ class ContainerInstrumentedTest {
                 await("external Application.onCreate (not a playback certification)") {
                     ContainerRuntime.state.value.applications.any { it.packageName == expected && it.lastStartedPid != null }
                 }
+                InstrumentationRegistry.getArguments().getString("externalUiText")?.let { expectedText ->
+                    require(expectedText.isNotBlank() && expectedText.length <= 200)
+                    val ui = instrumentation.uiAutomation
+                    fun visibleAppScreen(): Boolean {
+                        val root = ui.rootInActiveWindow ?: return false
+                        return root.findAccessibilityNodeInfosByText(expectedText).any {
+                            it.packageName?.toString() == expected && it.isVisibleToUser &&
+                                !it.isPassword && it.text?.toString() == expectedText
+                        }
+                    }
+                    await("external app visible screen '$expectedText' (not login or playback)", ::visibleAppScreen)
+                    // Initialization may succeed just before a crash or an immediate redirect.
+                    // Demand that the requested app screen remains visible for a short interval.
+                    val stableUntil = SystemClock.elapsedRealtime() + 3_000
+                    while (SystemClock.elapsedRealtime() < stableUntil) {
+                        assertTrue("External app screen disappeared after initialization", visibleAppScreen())
+                        SystemClock.sleep(100)
+                    }
+                }
             }
             return
         }
@@ -88,6 +107,12 @@ class ContainerInstrumentedTest {
                 }
             }
             click("Check unsupported output rejection")
+            await("ordinary-UID MediaRouter2 discovery") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("MEDIA ROUTER ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("MEDIA ROUTER READY:")?.isNotEmpty() == true
+            }
             await("unsupported formats rejected inside the container") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("Unsupported output test failed:")

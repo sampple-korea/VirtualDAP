@@ -40,6 +40,14 @@ public final class MusicFixtureActivity extends Activity {
         identity.setText("MUSIC FIXTURE READY\nPackage: " + getPackageName() + "\nLaunches: " + launches);
         identity.setTextSize(20);
         content.addView(identity);
+        TextView mediaRoutes = new TextView(this);
+        try {
+            android.media.MediaRouter2 router = android.media.MediaRouter2.getInstance(this);
+            mediaRoutes.setText("MEDIA ROUTER READY: " + router.getRoutes().size());
+        } catch (RuntimeException failure) {
+            mediaRoutes.setText("MEDIA ROUTER ERROR: " + failure);
+        }
+        content.addView(mediaRoutes);
         TextView feature = new TextView(this);
         try {
             feature.setText((String) Class.forName("com.virtualdap.fixture.feature.FeatureMarker")

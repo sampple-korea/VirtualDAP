@@ -317,6 +317,26 @@ public final class LogSender {
     content = content.replace("isMicrophoneMutedForUser returning false", "querying microphone state")
     audio_proxy.write_text(content, encoding="utf-8")
 
+    media_router = package / "fake/service/IMediaRouterServiceProxy.java"
+    content = media_router.read_text(encoding="utf-8")
+    content = replace_once(content, '    @ProxyMethod("registerClientAsUser")', '''    @ProxyMethod("getSystemRoutes")
+    public static class GetSystemRoutes extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // Android 16 added caller attribution; Android 14's method has no arguments.
+            // Attribute only this process's own call to its real host UID/package. Do not
+            // alter proxy-router flags, target packages, permissions or returned routes.
+            String guest = top.niunaijun.blackbox.app.BActivityThread.getAppPackageName();
+            if (args != null && args.length > 0 && guest != null && guest.equals(args[0])) {
+                args[0] = top.niunaijun.blackbox.BlackBoxCore.getHostPkg();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("registerClientAsUser")''')
+    media_router.write_text(content, encoding="utf-8")
+
     compat = package / "utils/compat/BuildCompat.java"
     content = compat.read_text(encoding="utf-8")
     content = replace_once(
