@@ -28,7 +28,7 @@ class DsfReader private constructor(private val input: InputStream) : DsdStreamR
     private var currentBlocks: Array<ByteArray>? = null
     private var currentValidBytes = 0
     private var currentOffset = 0
-    private var closed = false
+    @Volatile private var closed = false
 
     init {
         val dsd = input.readExact(28, "DSD header")
@@ -90,7 +90,6 @@ class DsfReader private constructor(private val input: InputStream) : DsdStreamR
     }
 
     /** Returns at most [maximumBytes], always containing complete interleaved channel frames. */
-    @Synchronized
     override fun readInterleaved(maximumBytes: Int): ByteArray? {
         check(!closed) { "DSF reader is closed" }
         require(maximumBytes in info.format.channelCount..MAX_PACKET_BYTES) { "Invalid DSF packet limit" }
@@ -137,7 +136,6 @@ class DsfReader private constructor(private val input: InputStream) : DsdStreamR
         return true
     }
 
-    @Synchronized
     override fun close() {
         if (closed) return
         closed = true

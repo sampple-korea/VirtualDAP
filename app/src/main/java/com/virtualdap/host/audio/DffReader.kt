@@ -21,7 +21,7 @@ class DffReader private constructor(private val input: InputStream) : DsdStreamR
     private val audioPadBytes: Int
     @Volatile private var bytesReadPerChannel = 0L
     private var padConsumed = false
-    private var closed = false
+    @Volatile private var closed = false
 
     init {
         val formHeader = input.readExact(12, "DSDIFF form header")
@@ -96,7 +96,6 @@ class DffReader private constructor(private val input: InputStream) : DsdStreamR
     override val durationMillis: Long get() = info.durationMillis
     override val samplePosition: Long get() = bytesReadPerChannel * 8L
 
-    @Synchronized
     override fun readInterleaved(maximumBytes: Int): ByteArray? {
         check(!closed) { "DSDIFF reader is closed" }
         require(maximumBytes in format.channelCount..MAX_PACKET_BYTES) { "Invalid DSDIFF packet limit" }
@@ -173,7 +172,6 @@ class DffReader private constructor(private val input: InputStream) : DsdStreamR
         padConsumed = true
     }
 
-    @Synchronized
     override fun close() {
         if (closed) return
         closed = true
