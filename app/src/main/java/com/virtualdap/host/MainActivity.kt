@@ -94,13 +94,18 @@ private fun VirtualDAPApp() {
     var pendingPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var dsdUri by rememberSaveable { mutableStateOf<String?>(null) }
     var dsdName by rememberSaveable { mutableStateOf<String?>(null) }
-    var dsdMode by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION) }
-    var dsdConfirmed by rememberSaveable { mutableStateOf(false) }
+    var dsdMode by rememberSaveable(audio.outputMode) { mutableStateOf(DsdOutputMode.PCM_CONVERSION) }
+    // Confirmation applies to this file and output only. Do not restore it after activity/process
+    // recreation: the DAC or its hardware volume may have changed while the UI was absent.
+    var dsdConfirmed by remember(audio.outputMode, audio.selectedRouteId, dsdMode, dsdUri) {
+        mutableStateOf(false)
+    }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(ContainerRuntime::install)
     }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            dsdConfirmed = false
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             dsdUri = uri.toString()
             dsdName = runCatching {
@@ -210,6 +215,7 @@ private fun VirtualDAPApp() {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { start(AudioPipelineService.ACTION_PLAY_DSD) }, enabled = dsdUri != null &&
                                     !audio.dsdPlayback.active && !audio.guestConnected && OutputRoutePolicy.selected(audio) != null &&
+                                    (audio.outputMode == OutputMode.USB || dsdMode != DsdOutputMode.NATIVE_DSD) &&
                                     (dsdMode == DsdOutputMode.PCM_CONVERSION || dsdConfirmed)) { Text("재생") }
                                 TextButton(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP_DSD) },
                                     enabled = audio.dsdPlayback.active) { Text("중지") }
@@ -261,9 +267,15 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onImport, enabled = ready) { Text("음악 앱 추가") }
-                TextButton(onClick = ContainerRuntime::refresh, enabled = ready) { Text("새로고침") }
+                TextButton(onClick = ContainerRuntime::refresh, enabled = apps.phase.canRefresh) {
+                    Text(if (apps.phase == ContainerPhase.ERROR) "다시 시도" else "새로고침")
+                }
             }
-            if (!ready) Text(if (apps.phase == ContainerPhase.INSTALLING) "음악 앱을 추가하는 중입니다…" else "음악 공간을 준비하는 중입니다…")
+            if (!ready) Text(when (apps.phase) {
+                ContainerPhase.INSTALLING -> "음악 앱을 추가하는 중입니다…"
+                ContainerPhase.ERROR -> "음악 공간을 불러오지 못했습니다. 다시 시도해 주세요."
+                else -> "음악 공간을 준비하는 중입니다…"
+            })
             apps.lastError?.let { ErrorText(it) }
             audio.lastError?.let { ErrorText(it) }
         }

@@ -33,7 +33,11 @@ import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback
 import top.niunaijun.blackbox.app.configuration.ClientConfiguration
 
-enum class ContainerPhase { INITIALIZING, READY, INSTALLING, ERROR }
+enum class ContainerPhase {
+    INITIALIZING, READY, INSTALLING, ERROR;
+
+    val canRefresh: Boolean get() = this == READY || this == ERROR
+}
 
 data class ContainerApp(
     val packageName: String,
