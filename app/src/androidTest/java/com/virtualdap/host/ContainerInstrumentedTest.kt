@@ -6,7 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.virtualdap.host.container.ContainerPhase
 import com.virtualdap.host.container.ContainerRuntime
-import com.virtualdap.host.service.AudioPipelineService
 import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.model.PipelinePhase
@@ -24,6 +23,12 @@ import org.junit.runner.RunWith
 /** Installs an actual, independently packaged APK into the ordinary-UID container. */
 @RunWith(AndroidJUnit4::class)
 class ContainerInstrumentedTest {
+    @Test fun successfulWaitDoesNotRepeatItsAction() {
+        var calls = 0
+        await("single successful action") { ++calls; true }
+        assertEquals("A successful click must not be dispatched a second time", 1, calls)
+    }
+
     @Test fun fixtureInstallsAndStartsInsideMusicSpace() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -251,7 +256,8 @@ class ContainerInstrumentedTest {
             capture.close()
             fixture.delete()
             ContainerRuntime.stop(FIXTURE)
-            AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP)
+            // CaptureProbe owns its receiver; no production service was started by this test.
+            // Starting a STOP-only service here can race the next test's foreground launch.
         }
     }
 
@@ -292,8 +298,11 @@ class ContainerInstrumentedTest {
 
     private fun await(operation: String, condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 60_000
-        while (!condition() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100)
-        assertTrue("$operation timed out: ${ContainerRuntime.state.value}", condition())
+        do {
+            if (condition()) return
+            SystemClock.sleep(100)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        org.junit.Assert.fail("$operation timed out: ${ContainerRuntime.state.value}; audio=${PipelineStore.state.value}")
     }
 
     companion object { const val FIXTURE = "com.virtualdap.fixture.music" }
