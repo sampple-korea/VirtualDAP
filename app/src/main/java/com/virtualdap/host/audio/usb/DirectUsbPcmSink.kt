@@ -1,7 +1,10 @@
 package com.virtualdap.host.audio.usb
 
+import com.virtualdap.host.audio.FloatPcmResampler
+import com.virtualdap.host.audio.HighQualityPcmResampler
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.audio.SinkConfiguration
+import com.virtualdap.host.audio.StreamingPcmConverter
 import com.virtualdap.host.model.OutputRoute
 import java.io.Closeable
 
@@ -9,11 +12,15 @@ import java.io.Closeable
 class DirectUsbPcmSink(
     private val deviceId: Int,
     private val route: OutputRoute,
+    private val createRateConverter: (Int, Int, Int) -> FloatPcmResampler =
+        ::HighQualityPcmResampler,
     private val openConnection: (Int, (List<UsbAudioStreamingProfile>) -> UsbAudioStreamingProfile) -> UsbHostController.DirectConnection =
         UsbHostController::openDirect,
 ) : Closeable {
     private var connection: UsbHostController.DirectConnection? = null
     private var packing: UsbPcmPacking? = null
+    private var converter: StreamingPcmConverter? = null
+    private var conversionTarget: PcmFormat? = null
     private var configuration: SinkConfiguration? = null
     private var playing = true
     private var exclusive = true
@@ -35,28 +42,91 @@ class DirectUsbPcmSink(
         configuration?.takeIf { it.requested == source }?.let { return it }
         finish()
         check(exclusive) { "Direct USB requires one active music stream; use Android output for overlapping tracks" }
-        val opened = openConnection(deviceId) { profiles ->
-            UsbPcmPacking.candidates(source, profiles).firstOrNull()
-                ?: error("No matching direct USB PCM profile for ${source.shortLabel()}")
+        val failures = mutableListOf<String>()
+        var profileIndex = 0
+        profileLoop@ while (true) {
+            var targetIndex = 0
+            var supportedRates: List<UsbSampleRateRange>? = null
+            var candidates: List<DirectUsbPcmCandidate>? = null
+            while (true) {
+                if (candidates?.let { targetIndex >= it.size } == true) break
+                var selectedProfile: UsbAudioStreamingProfile? = null
+                val opened = try {
+                    openConnection(deviceId) { profiles ->
+                        DirectUsbPcmPlanner.compatibleProfiles(source, profiles).getOrNull(profileIndex)
+                            ?.also { selectedProfile = it }
+                            ?: throw ProfilesExhausted()
+                    }
+                } catch (_: ProfilesExhausted) {
+                    break@profileLoop
+                } catch (failure: Throwable) {
+                    if (selectedProfile == null) throw failure
+                    if (failure !is Exception) throw failure
+                    failures += selectedProfile.failureLabel(failure)
+                    break
+                }
+                val profile = requireNotNull(selectedProfile)
+                val rates = supportedRates ?: try {
+                    UsbAudioClockControl(opened.output::control).supportedRates(profile)
+                        .also { supportedRates = it }
+                } catch (failure: Exception) {
+                    opened.close()
+                    failures += profile.failureLabel(failure)
+                    break
+                }
+                val available = candidates ?: DirectUsbPcmPlanner.candidates(source, profile, rates)
+                    .also { candidates = it }
+                val candidate = available.getOrNull(targetIndex)
+                if (candidate == null) {
+                    opened.close()
+                    break
+                }
+                var streamConverter: StreamingPcmConverter? = null
+                try {
+                    val target = candidate.inputFormat
+                    val adapter = UsbPcmPacking(target, opened.output.profile)
+                    streamConverter = createConverter(source, target)
+                    opened.output.start(target.sampleRate)
+                    if (!playing) opened.output.pause()
+                    val preserved = streamConverter == null && adapter.preservesSource
+                    packing = adapter
+                    converter = streamConverter
+                    conversionTarget = target
+                    connection = opened
+                    suspendedStatistics = null
+                    return SinkConfiguration(
+                        source, adapter.outputFormat, route, directPlayback = true,
+                        bufferFrames = target.sampleRate / 10, sourcePreserved = preserved,
+                        bitPerfectRequested = preserved,
+                    ).also { configuration = it }
+                } catch (failure: Throwable) {
+                    streamConverter?.close()
+                    opened.close()
+                    if (failure !is Exception) throw failure
+                    failures += "${profile.failureLabel(failure)} at ${candidate.inputFormat.shortLabel()}"
+                    targetIndex++
+                }
+            }
+            profileIndex++
         }
-        try {
-            val adapter = UsbPcmPacking(source, opened.output.profile)
-            opened.output.start(source.sampleRate)
-            if (!playing) opened.output.pause()
-            packing = adapter
-            connection = opened
-            suspendedStatistics = null
-            return SinkConfiguration(
-                source, adapter.outputFormat, route, directPlayback = true,
-                bufferFrames = source.sampleRate / 10, sourcePreserved = adapter.preservesSource,
-                bitPerfectRequested = adapter.preservesSource,
-            ).also { configuration = it }
-        } catch (failure: Exception) {
-            opened.close()
-            throw failure
-        }
+        val detail = failures.distinct().takeLast(4).joinToString("; ")
+        throw IllegalStateException(
+            buildString {
+                append("No direct USB PCM profile accepted ")
+                append(source.shortLabel())
+                if (detail.isNotEmpty()) append(": ").append(detail)
+            },
+        )
     }
     fun write(input: ByteArray): Int {
+        converter?.let { active ->
+            active.convertInto(input, ::writeConverted)
+            return input.size
+        }
+        if (input.isNotEmpty()) writeConverted(input)
+        return input.size
+    }
+    private fun writeConverted(input: ByteArray) {
         val transport = connection?.output ?: error("Direct USB output is not configured")
         val adapter = packing ?: error("Direct USB format is not configured")
         val bytes = adapter.pack(input, left, right)
@@ -68,7 +138,6 @@ class DirectUsbPcmSink(
             check(accepted > 0 && accepted % adapter.profile.frameBytes == 0) { "USB output stopped accepting complete frames" }
             offset += accepted
         }
-        return input.size
     }
     fun statistics(): UsbOutputStatistics? = connection?.output?.statistics() ?: suspendedStatistics
     fun queuedDurationMs(): Double? {
@@ -79,21 +148,61 @@ class DirectUsbPcmSink(
     fun bitPerfectActive(): Boolean {
         val stats = statistics() ?: return false
         val adapter = packing ?: return false
-        return connection != null && exclusive && adapter.preservesSource && left == 1f && right == 1f &&
+        return connection != null && exclusive && configuration?.sourcePreserved == true &&
+            adapter.preservesSource && left == 1f && right == 1f &&
             stats.error == 0 && stats.completedFrames > 0 && stats.underruns == 0L &&
             (adapter.profile.feedbackEndpointAddress == null || stats.feedbackPackets > 0)
     }
     fun routedOutput(): OutputRoute? = route.takeIf { (statistics()?.completedFrames ?: 0) > 0 }
-    fun flush() { connection?.output?.flush() }
+    fun flush() {
+        val active = connection?.output ?: return
+        active.flush()
+        val config = configuration ?: return
+        val target = conversionTarget ?: return
+        try {
+            converter?.close()
+            converter = null
+            converter = createConverter(config.requested, target)
+        } catch (failure: Throwable) {
+            close()
+            throw failure
+        }
+    }
     fun finish() {
         try {
-            connection?.output?.let { it.drain(); suspendedStatistics = it.statistics() }
+            connection?.output?.let { output ->
+                converter?.finish()?.takeIf { it.isNotEmpty() }?.let(::writeConverted)
+                output.drain()
+                suspendedStatistics = output.statistics()
+            }
         } finally { close() }
     }
     override fun close() {
-        connection?.close()
+        val closingConnection = connection
+        val closingConverter = converter
         connection = null
         packing = null
+        converter = null
+        conversionTarget = null
         configuration = null
+        try { closingConverter?.close() } finally { closingConnection?.close() }
     }
+
+    private fun createConverter(source: PcmFormat, target: PcmFormat): StreamingPcmConverter? {
+        if (source == target) return null
+        val rateConverter = if (source.sampleRate != target.sampleRate) {
+            createRateConverter(source.sampleRate, target.sampleRate, target.channelCount)
+        } else null
+        return try {
+            StreamingPcmConverter(source, target, rateConverter)
+        } catch (failure: Throwable) {
+            rateConverter?.close()
+            throw failure
+        }
+    }
+
+    private fun UsbAudioStreamingProfile.failureLabel(failure: Exception): String =
+        "USB alt $alternateSetting: ${failure.message ?: failure.javaClass.simpleName}"
+
+    private class ProfilesExhausted : IllegalStateException()
 }

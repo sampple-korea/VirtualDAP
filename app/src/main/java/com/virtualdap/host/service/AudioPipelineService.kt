@@ -445,7 +445,11 @@ class AudioPipelineService : Service() {
                 output.configuration.configured,
                 output.routedOutput() ?: fallbackRoute,
                 null,
-                "DSD converted to PCM with a stateful 96-tap low-pass filter",
+                if (output.outputFormat.sampleRate == output.configuration.configured.sampleRate) {
+                    "DSD converted to PCM with a stateful 96-tap low-pass filter"
+                } else {
+                    "DSD converted with a 96-tap low-pass filter and packet-continuous best-sinc rate matching"
+                },
             )
             else -> DsdOutputSnapshot(null, fallbackRoute, null, null)
         }

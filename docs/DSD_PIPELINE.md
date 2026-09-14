@@ -29,7 +29,9 @@ Implemented components:
   selecting native DSD or DoP. A generic PCM capability does not imply native DSD support.
 - `DsdPcmDecoder` wraps the source-pinned BSD-licensed `dsd2pcm` 96-tap filter. It keeps independent
   channel history, performs 8:1 decimation and emits interleaved float PCM. Any further resampling
-  needed by the output remains a separate stage.
+  needed by the output remains a separate libsamplerate best-sinc stage. That stage keeps history
+  across packets, emits its tail before drain and favors a target in the source's 44.1/48 kHz clock
+  family.
 - `DsdPlaybackTask` owns the reader/output lifecycle on one worker, applies pause only between
   complete source packets, closes a blocked content stream on cancellation and never drains a
   cancelled or failed source.
@@ -44,7 +46,7 @@ MediaStore DSF-to-AudioTrack foreground-service playback, and fail-closed native
 exclusive USB route is selected.
 
 ```shell
-git submodule update --init third_party/dsd2pcm
+git submodule update --init --recursive
 bash scripts/verify_dsp.sh
 ./gradlew testDebugUnitTest
 ./gradlew connectedDebugAndroidTest
@@ -61,5 +63,7 @@ Specifications: [DoP 1.1](https://dsd-guide.com/sites/default/files/white-papers
 [Philips DSDIFF 1.5](https://dsd-guide.com/sites/default/files/white-papers/DSDIFF_1.5_Spec.pdf).
 Filter source and license:
 [dsd2pcm at 6cfb3ba](https://github.com/clivem/dsd2pcm/tree/6cfb3bad54c103a74f15f0399fa8f435ecc3592a).
+Sample-rate converter source and license:
+[libsamplerate at 0844c208](https://github.com/libsndfile/libsamplerate/tree/0844c208f683527c08ea8a80acc13b398aa9c8bf).
 Native USB layout facts:
 [Linux USB-audio quirks at b731337](https://github.com/torvalds/linux/blob/b7313376809292f0e6bf2d5750225c8b66e9ccda/sound/usb/quirks.c).

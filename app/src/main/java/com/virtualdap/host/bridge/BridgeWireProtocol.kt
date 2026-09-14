@@ -153,6 +153,9 @@ class BridgeWireReader(private val input: InputStream) {
         val sampleRate = data.int
         val channels = data.short.toInt() and 0xffff
         val encoding = data.short.toInt() and 0xffff
+        if (sampleRate !in 8_000..768_000) {
+            throw BridgeProtocolException("Invalid bridge sample rate: $sampleRate")
+        }
         return try {
             PcmFormat(sampleRate, channels, PcmEncoding.fromWireId(encoding))
         } catch (error: IllegalArgumentException) {

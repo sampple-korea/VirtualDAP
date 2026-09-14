@@ -146,7 +146,7 @@ object UsbHostController {
                 opened.close()
                 directLease.set(false)
             }
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             connection?.close()
             directLease.set(false)
             throw failure

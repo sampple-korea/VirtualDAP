@@ -8,6 +8,10 @@ if [[ ! -f "$repo_root/third_party/dsd2pcm/dsd2pcm.c" ]]; then
     echo "Initialize DSP source with git submodule update --init third_party/dsd2pcm" >&2
     exit 1
 fi
+if [[ ! -f "$repo_root/third_party/libsamplerate/src/samplerate.c" ]]; then
+    echo "Initialize resampler source with git submodule update --init third_party/libsamplerate" >&2
+    exit 1
+fi
 "$cmake" -S "$repo_root/app/src/main/cpp" -B "$repo_root/native_runtime/build/dsp-host" \
     -DCMAKE_BUILD_TYPE=Release
 "$cmake" --build "$repo_root/native_runtime/build/dsp-host" --parallel 2

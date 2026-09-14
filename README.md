@@ -25,10 +25,12 @@ hi-res players. Compressed offload is intentionally absent so an app cannot bypa
 host rebuilds `AudioTrack` on a format epoch, applies backpressure with blocking writes, monitors
 disconnects/drops, enumerates real audio routes, and tries the exact source PCM first. If the host
 or selected route rejects that format, a stateful compatibility converter negotiates float/16-bit,
-supported sample rates and stereo downmix in that order. The UI distinguishes unchanged PCM,
-software conversion, Android direct support and a mixer path; it never labels an unverified output
-as bit-perfect. Reported queue latency is derived from submitted frames minus the live AudioTrack
-playback head.
+supported sample rates and stereo downmix in that order. Every production sample-rate change uses
+the source-pinned libsamplerate best-sinc filter, retains state across bridge packets and streams
+bounded conversion slices instead of allocating one ratio-expanded packet. The UI distinguishes
+unchanged PCM, software conversion, Android direct support and a mixer path; it never labels an
+unverified output as bit-perfect. Reported queue latency is derived from submitted frames minus the
+live AudioTrack playback head.
 
 ## Music application compatibility target
 
@@ -62,8 +64,8 @@ or explicitly confirmed DoP. DoP framing and the native DSD-to-PCM filter are de
 [DSD pipeline](docs/DSD_PIPELINE.md).
 The opt-in internal direct USB engine, its tests and current limits are described in
 [USB output](docs/USB_OUTPUT.md).
-The filter is built for all four Android ABIs with NDK 28.2.13676358; its license notice is included
-in APK assets.
+The DSD filter and high-quality sample-rate converter are built for all four Android ABIs with NDK
+28.2.13676358; their license notices are included in APK assets.
 
 ## Build and test the Android 13 guest bridge
 

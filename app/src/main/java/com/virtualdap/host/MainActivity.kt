@@ -807,7 +807,7 @@ private fun DsdFilePlayer(
             selected = selectedMode == DsdOutputMode.PCM_CONVERSION,
             enabled = !controlsLocked,
             title = "DSD → PCM",
-            detail = "96-tap DSD low-pass conversion, then the selected Android or USB PCM output",
+            detail = "96-tap DSD filter, then best-sinc rate matching when the selected output needs it",
             onClick = { selectedModeName = DsdOutputMode.PCM_CONVERSION.name },
         )
         DsdModeOption(
@@ -1027,7 +1027,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
                     snapshot.activeRoute?.directUsbDeviceId != null && snapshot.bitPerfectActive ->
                         "Direct USB: source precision preserved, clock negotiation accepted and complete USB transfers observed. DAC presentation timing is not measured."
                     snapshot.bitPerfectActive -> "USB bit-perfect: unchanged PCM, with the OS bit-perfect mixer active on the routed DAC."
-                    !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}."
+                    !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}. Rate changes use the best-sinc filter."
                     snapshot.activeRoute?.directUsbDeviceId != null -> "Direct USB transport. Waiting for clean completed transfers before confirming the output path."
                     snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
                     else -> "Source PCM reaches AudioTrack unchanged; the Android mixer may convert the hardware output."

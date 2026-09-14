@@ -8,7 +8,7 @@ import kotlin.math.roundToLong
 class UsbPcmPacking(val source: PcmFormat, val profile: UsbAudioStreamingProfile) {
     init {
         require(source.channelCount == profile.channelCount)
-        require(profile.subslotBytes in 2..4 && profile.bitResolution in setOf(16, 24, 32))
+        require(profile.subslotBytes in 2..4 && profile.bitResolution in 16..32)
         require(profile.bitResolution <= profile.subslotBytes * 8)
         require(profile.pcm.xor(profile.floatingPoint) && !profile.rawData) {
             "Select an unambiguous PCM alternate setting; RAW/DSD and selectable multi-format alternatives need their typed driver"
@@ -18,8 +18,8 @@ class UsbPcmPacking(val source: PcmFormat, val profile: UsbAudioStreamingProfile
     private val floatOutput = profile.floatingPoint
     val outputFormat = PcmFormat(source.sampleRate, source.channelCount, when {
         floatOutput -> PcmEncoding.PCM_FLOAT
-        profile.bitResolution == 16 -> PcmEncoding.PCM_16
-        profile.bitResolution == 24 -> PcmEncoding.PCM_24_PACKED
+        profile.bitResolution <= 16 -> PcmEncoding.PCM_16
+        profile.bitResolution <= 24 -> PcmEncoding.PCM_24_PACKED
         else -> PcmEncoding.PCM_32
     })
     val preservesSource: Boolean = if (source.encoding == PcmEncoding.PCM_FLOAT) floatOutput

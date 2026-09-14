@@ -19,7 +19,10 @@ data class PcmFormat(
     val encoding: PcmEncoding,
 ) {
     init {
-        require(sampleRate in 8_000..768_000) { "Invalid sample rate: $sampleRate" }
+        // DSD-to-PCM first emits one float sample per source byte (8:1 decimation), so DSD1024
+        // reaches 6.144 MHz before the explicit high-quality output resampler. Bridge inputs retain
+        // their tighter 768 kHz protocol limit at the wire parser.
+        require(sampleRate in 8_000..6_144_000) { "Invalid sample rate: $sampleRate" }
         require(channelCount in 1..8) { "Invalid channel count: $channelCount" }
     }
 

@@ -34,9 +34,17 @@ Cleanup returns it to alternate zero and releases the interface.
   invalidate output verification instead of silently claiming uninterrupted playback.
 
 The PCM adapter preserves integer precision when widening or adding left-justified USB subslot
-padding. Narrowing, float-to-integer conversion and application volume are explicit processing.
+padding, including 20-bit samples left-aligned in three-byte subslots. Narrowing,
+float-to-integer conversion and application volume are explicit processing.
 USB completion counters describe host-controller transfers, not measured DAC presentation.
 Active playback holds a lifecycle-bound partial wake lock, including when AudioFlinger is bypassed.
+
+Exact source PCM is always negotiated first. If a DAC rejects it, the sink queries UAC2 clock
+ranges (or uses validated UAC1 descriptor ranges), favors another rate in the same 44.1/48 kHz
+family, and retries compatible alternate settings. Rate changes use libsamplerate's
+`SRC_SINC_BEST_QUALITY` state across packets; channel/encoding conversion remains explicit. A
+converted path cannot report bit-perfect/source-preserved status. Flush replaces the filter state,
+and finish writes its final filter tail before draining USB.
 
 The typed DSD adapter accepts canonical time-ordered DSD bytes and connects them directly to this
 same bounded transport. Reference-qualified native U8/U16/U32 layouts preserve word/bit order.
@@ -47,11 +55,11 @@ volume, mixer or sample-rate-conversion entry point.
 ## Current boundaries
 
 Direct USB currently reserves one active music stream. Use the Android output route for overlapping
-tracks. Source rate/channel count must match an available direct profile; this path does not yet
-perform sample-rate/channel fallback. Ambiguous multi-format and RAW alternatives are excluded from
-the PCM path. Clock selectors/multipliers, implicit-feedback endpoints and vendor-specific feedback/
-native-DSD quirks require further integration. The first matching PCM profile is tried; alternative
-retry after a clock rejection is not yet implemented.
+tracks. Ambiguous multi-format and RAW alternatives are excluded from the PCM path. Channel fallback
+supports exact layouts, mono/stereo expansion, stereo/mono conversion and multichannel-to-stereo or
+mono downmix; it does not invent arbitrary surround channels. Clock selectors/multipliers,
+implicit-feedback endpoints and vendor-specific feedback/native-DSD quirks require further
+integration.
 
 Native DSD/DoP framing, qualified mode selection and direct transport composition are invoked by
 the foreground DSF/DSDIFF player and JVM-tested. A generic RAW descriptor or high PCM rate is never
@@ -65,15 +73,19 @@ backend and verifies exact bytes, fractional rates, feedback, pause/flush/drain,
 transfers, cancellation, short-packet failure, device disconnection, invalid feedback and descriptor
 ownership. These tests also passed AddressSanitizer and UndefinedBehaviorSanitizer locally.
 
-JVM tests cover PCM subslot packing, widening/narrowing, float handling, DSD word/DoP framing and the
-complete PCM and DSD sinks with partial writes, discontinuities, truncation and failing negotiation.
-Android instrumentation loads the actual native
-library, rejects a non-USB descriptor without closing the caller's descriptor, and retains the
-existing container/PCM/overlap/split-install tests.
+JVM tests cover PCM subslot packing, 20/24/32-bit widening/narrowing, float handling, format-family
+planning, alternate-setting retry, bounded conversion, DSD word/DoP framing and the complete PCM and
+DSD sinks with partial writes, discontinuities, truncation and failing negotiation. Android
+instrumentation loads the actual native libraries, verifies best-sinc packet continuity and
+pass/stop-band behavior, rejects a non-USB descriptor without closing the caller's descriptor, and
+retains the existing container/PCM/overlap/split-install tests.
 
 No physical DAC, USB analyzer or analog output has been tested. This is code/protocol validation,
 not a claim of measured hardware playback.
 
-libusb's full LGPL license and source/build provenance are included in APK assets. Upstream:
+libusb's full LGPL license and source/build provenance are included in APK assets. The BSD-licensed
+libsamplerate source is pinned at `0844c208f683527c08ea8a80acc13b398aa9c8bf`, and its license is
+included in the same assets. Upstream:
 [libusb Android integration](https://github.com/libusb/libusb/tree/v1.0.30/android),
-[asynchronous transfers](https://libusb.sourceforge.io/api-1.0/group__libusb__asyncio.html).
+[asynchronous transfers](https://libusb.sourceforge.io/api-1.0/group__libusb__asyncio.html),
+[libsamplerate](https://github.com/libsndfile/libsamplerate/tree/0844c208f683527c08ea8a80acc13b398aa9c8bf).

@@ -29,6 +29,15 @@ class UsbPcmPackingTest {
         assertFalse(adapter.preservesSource)
         assertArrayEquals(byteArrayOf(2, 3, 4, -2, -3, -4), adapter.pack(byteArrayOf(1, 2, 3, 4, -1, -2, -3, -4)))
     }
+    @Test fun twentyBitUsbSubslotsArePackedAndLeftAlignedWithoutFalsePreservation() {
+        val twentyBit = profile(20, 3)
+        val adapter = UsbPcmPacking(PcmFormat(48_000, 2, PcmEncoding.PCM_24_PACKED), twentyBit)
+        assertArrayEquals(
+            byteArrayOf(0x10, 0x32, 0x54, 0, -0x32, -0x55),
+            adapter.pack(byteArrayOf(0x1f, 0x32, 0x54, 0x0f, -0x32, -0x55)),
+        )
+        assertFalse(adapter.preservesSource)
+    }
     @Test fun floatConversionClipsSafelyAndMuteIsZero() {
         val input = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putFloat(1f).putFloat(-1f).array()
         val adapter = UsbPcmPacking(PcmFormat(48_000, 2, PcmEncoding.PCM_FLOAT), profile(16, 2))

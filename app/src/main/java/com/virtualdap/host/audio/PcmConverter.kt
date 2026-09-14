@@ -1,7 +1,7 @@
 package com.virtualdap.host.audio
 
+import java.io.Closeable
 import java.io.ByteArrayOutputStream
-import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /** Ordered fallback formats. Exact PCM always wins; conversion is attempted only after rejection. */
@@ -23,7 +23,10 @@ object OutputFormatPlanner {
         val alternateRates = (routeSampleRates.filter { it in 8_000..768_000 } + 48_000 + 44_100)
             .distinct()
             .filterNot { it == source.sampleRate }
-            .sortedBy { kotlin.math.abs(it.toLong() - source.sampleRate) }
+            .sortedWith(
+                compareBy<Int> { if (sameRateFamily(source.sampleRate, it)) 0 else 1 }
+                    .thenBy { kotlin.math.abs(it.toLong() - source.sampleRate) },
+            )
             .take(8)
         val result = mutableListOf<PcmFormat>()
 
@@ -39,71 +42,74 @@ object OutputFormatPlanner {
         }
         return result.distinct()
     }
+
+    internal fun sameRateFamily(source: Int, target: Int): Boolean =
+        (source % 44_100 == 0 && target % 44_100 == 0) ||
+            (source % 48_000 == 0 && target % 48_000 == 0)
 }
 
-/**
- * Stateful linear PCM converter for compatibility fallback. It keeps the interpolation phase and
- * final input frame across bridge packets so resampling never resets at packet boundaries.
- */
+/** PCM encoding/channel adapter with an explicitly supplied stateful rate converter. */
 class StreamingPcmConverter(
     val source: PcmFormat,
     val target: PcmFormat,
-) {
-    private var pending = FloatArray(0)
-    private var sourcePosition = 0.0
+    private val rateConverter: FloatPcmResampler? = null,
+) : Closeable {
+    private var finished = false
+
+    init {
+        require((source.sampleRate == target.sampleRate) == (rateConverter == null)) {
+            "Sample-rate changes require one explicit converter, and matching rates require none"
+        }
+    }
 
     fun convert(input: ByteArray): ByteArray {
-        require(input.size % source.frameSizeBytes == 0) { "PCM input contains a partial frame" }
-        if (input.isEmpty()) return input
-        if (source == target) return input
-        val mapped = decodeAndMap(input)
-        if (source.sampleRate == target.sampleRate) return encode(mapped)
-
-        val combined = FloatArray(pending.size + mapped.size)
-        pending.copyInto(combined)
-        mapped.copyInto(combined, pending.size)
-        val channels = target.channelCount
-        val frames = combined.size / channels
-        val step = source.sampleRate.toDouble() / target.sampleRate
-        val estimatedFrames = ((frames - sourcePosition) / step).toInt().coerceAtLeast(1)
-        val output = ByteArrayOutputStream(estimatedFrames * target.frameSizeBytes)
-        while (sourcePosition + 1.0 < frames) {
-            val leftFrame = floor(sourcePosition).toInt()
-            val fraction = (sourcePosition - leftFrame).toFloat()
-            for (channel in 0 until channels) {
-                val left = combined[leftFrame * channels + channel]
-                val right = combined[(leftFrame + 1) * channels + channel]
-                writeSample(output, left + (right - left) * fraction)
-            }
-            sourcePosition += step
-        }
-        val discardedFrames = floor(sourcePosition).toInt().coerceAtMost((frames - 1).coerceAtLeast(0))
-        pending = combined.copyOfRange(discardedFrames * channels, combined.size)
-        sourcePosition -= discardedFrames
+        val output = ByteArrayOutputStream()
+        convertInto(input, output::write)
         return output.toByteArray()
     }
 
-    /** Emits the final interpolation frame(s) only at the end of a stream, never between packets. */
-    fun finish(): ByteArray {
-        if (pending.isEmpty()) return byteArrayOf()
-        val channels = target.channelCount
-        val frames = pending.size / channels
-        val step = source.sampleRate.toDouble() / target.sampleRate
-        val output = ByteArrayOutputStream()
-        while (sourcePosition < frames) {
-            val leftFrame = floor(sourcePosition).toInt()
-            val rightFrame = (leftFrame + 1).coerceAtMost(frames - 1)
-            val fraction = (sourcePosition - leftFrame).toFloat()
-            for (channel in 0 until channels) {
-                val left = pending[leftFrame * channels + channel]
-                val right = pending[rightFrame * channels + channel]
-                writeSample(output, left + (right - left) * fraction)
-            }
-            sourcePosition += step
+    /**
+     * Converts bounded source slices and immediately hands each result to the sink. This prevents
+     * a legal 1 MiB low-rate bridge packet from becoming one enormous allocation when a DAC only
+     * accepts a much higher clock.
+     */
+    fun convertInto(input: ByteArray, consume: (ByteArray) -> Unit) {
+        check(!finished) { "PCM converter has already finished" }
+        require(input.size <= MAX_INPUT_BYTES) { "PCM input exceeds the packet limit" }
+        require(input.size % source.frameSizeBytes == 0) { "PCM input contains a partial frame" }
+        if (input.isEmpty()) return
+        if (source == target) {
+            consume(input)
+            return
         }
-        pending = FloatArray(0)
-        sourcePosition = 0.0
-        return output.toByteArray()
+        val framesPerChunk = maxOf(1, MAX_MAPPED_SAMPLES_PER_CHUNK / target.channelCount)
+        val chunkBytes = framesPerChunk * source.frameSizeBytes
+        var offset = 0
+        while (offset < input.size) {
+            val length = minOf(chunkBytes, input.size - offset)
+            convertChunk(input.copyOfRange(offset, offset + length))
+                .takeIf { it.isNotEmpty() }
+                ?.let(consume)
+            offset += length
+        }
+    }
+
+    private fun convertChunk(input: ByteArray): ByteArray {
+        val mapped = decodeAndMap(input)
+        if (source.sampleRate == target.sampleRate) return encode(mapped)
+        return encode(requireNotNull(rateConverter).convert(mapped))
+    }
+
+    /** Emits the native filter tail only at end of stream and exactly once. */
+    fun finish(): ByteArray {
+        if (finished) return byteArrayOf()
+        finished = true
+        return rateConverter?.finish()?.let(::encode) ?: byteArrayOf()
+    }
+
+    override fun close() {
+        rateConverter?.close()
+        finished = true
     }
 
     private fun decodeAndMap(input: ByteArray): FloatArray {
@@ -210,5 +216,10 @@ class StreamingPcmConverter(
 
     private fun writeInteger(output: ByteArrayOutputStream, value: Int, bytes: Int) {
         repeat(bytes) { byte -> output.write(value ushr (byte * 8) and 0xff) }
+    }
+
+    private companion object {
+        const val MAX_INPUT_BYTES = 1024 * 1024
+        const val MAX_MAPPED_SAMPLES_PER_CHUNK = 8 * 1024
     }
 }

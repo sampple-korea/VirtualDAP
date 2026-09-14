@@ -12,10 +12,12 @@ class DirectUsbPcmSinkTest {
         listOf(UsbSampleRateRange(48_000, 48_000)), false,
     )
     private val route = OutputRoute(-1_000_042, "Test USB", 11, true, listOf(48_000), emptyList(), 42)
-    private inner class Transport : UsbOutputTransport {
-        override val profile = this@DirectUsbPcmSinkTest.profile
+    private inner class Transport(
+        override val profile: UsbAudioStreamingProfile = this@DirectUsbPcmSinkTest.profile,
+    ) : UsbOutputTransport {
         val bytes = ByteArrayOutputStream()
         var started = false
+        var startedRate: Int? = null
         var paused = false
         var closed = false
         var underruns = 0L
@@ -23,13 +25,14 @@ class DirectUsbPcmSinkTest {
         var drains = 0
         var rejectClock = false
         override fun start(sampleRate: Int) {
-            check(sampleRate == 48_000 && !rejectClock) { "USB clock rejected the rate" }
+            check(profile.rates.any { it.contains(sampleRate) } && !rejectClock) { "USB clock rejected the rate" }
             started = true
+            startedRate = sampleRate
         }
         override fun write(bytes: ByteArray): Int {
             check(started && !paused && !closed)
             if (error != 0) return -1
-            val count = minOf(16, bytes.size) // Force many partial native writes.
+            val count = minOf(profile.frameBytes * 2, bytes.size) // Force many complete-frame writes.
             this.bytes.write(bytes, 0, count)
             return count
         }
@@ -40,15 +43,27 @@ class DirectUsbPcmSinkTest {
         override fun drain() { drains++ }
         override fun close() { closed = true }
         override fun statistics() = UsbOutputStatistics(
-            bytes.size() / 8L, bytes.size() / 8L, bytes.size() / 8L, underruns, 0, 0, 0, error, 3,
+            bytes.size().toLong() / profile.frameBytes, bytes.size().toLong() / profile.frameBytes,
+            bytes.size().toLong() / profile.frameBytes, underruns, 0, 0, 0, error, 3,
         )
     }
-    private fun sink(transport: Transport, released: () -> Unit = {}): DirectUsbPcmSink =
-        DirectUsbPcmSink(42, route) { id, select ->
+    private fun sink(
+        transport: Transport,
+        createResampler: (Int, Int, Int) -> FloatPcmResampler = { _, _, _ -> error("Unexpected resampling") },
+        released: () -> Unit = {},
+    ): DirectUsbPcmSink =
+        DirectUsbPcmSink(42, route, createResampler) { id, select ->
             assertEquals(42, id)
-            assertEquals(profile, select(listOf(profile)))
+            assertEquals(transport.profile, select(listOf(transport.profile)))
             UsbHostController.DirectConnection(transport, released)
         }
+
+    private class PassthroughResampler : FloatPcmResampler {
+        var closed = false
+        override fun convert(interleavedPcm: FloatArray) = interleavedPcm.copyOf()
+        override fun finish() = FloatArray(0)
+        override fun close() { closed = true }
+    }
 
     @Test fun partialNativeWritesPreserveEveryPackedSourceByte() {
         val transport = Transport()
@@ -109,5 +124,62 @@ class DirectUsbPcmSinkTest {
         }
         assertTrue(rejecting.closed)
         assertEquals(1, releases)
+    }
+
+    @Test fun unsupportedDsdPcmRateUsesStreamingHighQualityFallbackAndResetsOnFlush() {
+        val transport = Transport()
+        val converters = mutableListOf<PassthroughResampler>()
+        val requests = mutableListOf<Triple<Int, Int, Int>>()
+        val sink = sink(transport, createResampler = { source, target, channels ->
+            requests += Triple(source, target, channels)
+            PassthroughResampler().also(converters::add)
+        })
+        sink.use {
+            it.setPlaying(false)
+            val source = PcmFormat(352_800, 2, PcmEncoding.PCM_FLOAT)
+            val configured = it.configure(source)
+            assertEquals(PcmFormat(48_000, 2, PcmEncoding.PCM_24_PACKED), configured.configured)
+            assertFalse(configured.sourcePreserved)
+            assertEquals(48_000, transport.startedRate)
+            assertEquals(listOf(Triple(352_800, 48_000, 2)), requests)
+
+            it.flush()
+            assertTrue(converters.first().closed)
+            assertEquals(2, converters.size)
+            it.setPlaying(true)
+            val input = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .putFloat(0.5f).putFloat(-0.5f).array()
+            assertEquals(input.size, it.write(input))
+            assertArrayEquals(
+                byteArrayOf(0, 0, 0, 64, 0, 0, 0, -64),
+                transport.bytes.toByteArray(),
+            )
+            assertFalse(it.bitPerfectActive())
+        }
+        assertTrue(converters.all { it.closed })
+    }
+
+    @Test fun rejectedExactProfileFallsThroughToAnotherAlternateAndRate() {
+        val exact = profile.copy(alternateSetting = 1, rates = listOf(UsbSampleRateRange(96_000, 96_000)))
+        val fallback = profile.copy(alternateSetting = 2)
+        val selected = mutableListOf<UsbAudioStreamingProfile>()
+        val transports = mutableListOf<Transport>()
+        var releases = 0
+        val sink = DirectUsbPcmSink(42, route, { _, _, _ -> PassthroughResampler() }) { _, choose ->
+            val chosen = choose(listOf(fallback, exact))
+            selected += chosen
+            val transport = Transport(chosen).apply { rejectClock = chosen == exact }
+            transports += transport
+            UsbHostController.DirectConnection(transport) { releases++ }
+        }
+
+        sink.use {
+            val configured = it.configure(PcmFormat(96_000, 2, PcmEncoding.PCM_24_PACKED))
+            assertEquals(48_000, configured.configured.sampleRate)
+            assertFalse(configured.sourcePreserved)
+        }
+        assertEquals(listOf(exact, fallback), selected)
+        assertTrue(transports.all { it.closed })
+        assertEquals(2, releases)
     }
 }

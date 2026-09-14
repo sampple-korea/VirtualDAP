@@ -50,7 +50,8 @@ Message type 5 has a four-byte command: 1 play, 2 pause, 3 flush, 4 drain/stop.
 Message type 6 has two little-endian float32 gains in [0, 1]; NaN/infinity are rejected.
 Pings refresh position after the last PCM submission. These are playback-head observations,
 **not measured USB DAC presentation timestamps**. A host compatibility resampler introduces
-source-frame rounding; hardware latency beyond Android's playback head is not claimed measured.
+source-frame rounding; production rate changes use a packet-continuous, source-pinned best-sinc
+filter. Hardware latency beyond Android's playback head is not claimed measured.
 
 ## Evidence and remaining work
 

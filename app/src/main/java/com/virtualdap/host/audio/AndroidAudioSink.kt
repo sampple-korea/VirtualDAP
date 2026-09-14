@@ -71,8 +71,14 @@ class AndroidAudioSink(context: Context) : Closeable {
         active.pause()
         active.flush()
         configuration?.let { config ->
-            converter = StreamingPcmConverter(config.requested, config.configured)
-                .takeIf { config.requested != config.configured }
+            converter?.close()
+            converter = null
+            try {
+                converter = createConverter(config.requested, config.configured)
+            } catch (failure: Throwable) {
+                releaseTrack()
+                throw failure
+            }
         }
         submittedFrames = 0
         playbackHeadWraps = 0
@@ -177,6 +183,7 @@ class AndroidAudioSink(context: Context) : Closeable {
             clearMixerPreference()
             throw error
         }
+        var streamConverter: StreamingPcmConverter? = null
         try {
             if (built.state != AudioTrack.STATE_INITIALIZED) {
                 throw AudioSinkException("Could not initialize ${target.shortLabel()}")
@@ -198,8 +205,9 @@ class AndroidAudioSink(context: Context) : Closeable {
                     @Suppress("DEPRECATION") AudioTrack.isDirectPlaybackSupported(androidFormat, attributes)
                 else -> false
             }
+            streamConverter = createConverter(source, target)
             track = built
-            converter = StreamingPcmConverter(source, target).takeIf { source != target }
+            converter = streamConverter
             submittedFrames = 0
             playbackHeadWraps = 0
             lastPlaybackHead = 0
@@ -213,7 +221,10 @@ class AndroidAudioSink(context: Context) : Closeable {
                 sourcePreserved = source == target,
                 bitPerfectRequested = bitPerfect,
             ).also { configuration = it }
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
+            streamConverter?.close()
+            if (track === built) track = null
+            if (converter === streamConverter) converter = null
             built.release()
             clearMixerPreference()
             throw error
@@ -264,9 +275,11 @@ class AndroidAudioSink(context: Context) : Closeable {
     }
 
     fun write(pcm: ByteArray): Int = synchronized(lock) {
-        val output = converter?.convert(pcm) ?: pcm
-        if (output.isEmpty()) return@synchronized pcm.size
-        writeOutput(output)
+        converter?.let { active ->
+            active.convertInto(pcm, ::writeOutput)
+            return@synchronized pcm.size
+        }
+        if (pcm.isNotEmpty()) writeOutput(pcm)
         pcm.size
     }
 
@@ -350,10 +363,24 @@ class AndroidAudioSink(context: Context) : Closeable {
         track = null
         clearMixerPreference()
         configuration = null
+        converter?.close()
         converter = null
         submittedFrames = 0
         playbackHeadWraps = 0
         lastPlaybackHead = 0
+    }
+
+    private fun createConverter(source: PcmFormat, target: PcmFormat): StreamingPcmConverter? {
+        if (source == target) return null
+        val resampler = if (source.sampleRate != target.sampleRate) {
+            HighQualityPcmResampler(source.sampleRate, target.sampleRate, target.channelCount)
+        } else null
+        return try {
+            StreamingPcmConverter(source, target, resampler)
+        } catch (failure: Throwable) {
+            resampler?.close()
+            throw failure
+        }
     }
 
     private fun AudioDeviceInfo.toOutputRoute() = OutputRoute(
