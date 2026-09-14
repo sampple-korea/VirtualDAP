@@ -30,6 +30,9 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The obsolete SDK 'tools' package is no longer in the remote repository.
+          packages: platform-tools
       - name: Install DSP native toolchain
         run: yes | sdkmanager "cmake;3.22.1" "ndk;28.2.13676358"
       - name: Verify host app
