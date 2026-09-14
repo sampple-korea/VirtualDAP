@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.database.Cursor
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -14,11 +15,20 @@ import android.os.PowerManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.virtualdap.host.MainActivity
 import com.virtualdap.host.R
 import com.virtualdap.host.audio.AndroidAudioSink
+import com.virtualdap.host.audio.DirectDsdPacketOutput
+import com.virtualdap.host.audio.DsdContainerReader
+import com.virtualdap.host.audio.DsdOutputMode
+import com.virtualdap.host.audio.DsdPacketOutput
+import com.virtualdap.host.audio.DsdPlaybackEvent
+import com.virtualdap.host.audio.DsdPlaybackTask
+import com.virtualdap.host.audio.DsdPcmPacketOutput
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.audio.RoutedAudioSink
@@ -26,9 +36,12 @@ import com.virtualdap.host.bridge.BridgePeerPolicy
 import com.virtualdap.host.bridge.LocalSocketBridgeServer
 import com.virtualdap.host.guest.GuestRuntimeController
 import com.virtualdap.host.model.LogLevel
+import com.virtualdap.host.model.DsdPlaybackPhase
+import com.virtualdap.host.model.DsdPlaybackSnapshot
 import com.virtualdap.host.model.PipelinePhase
 import com.virtualdap.host.audio.usb.UsbHostController
 import kotlinx.coroutines.*
+import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.PI
@@ -41,6 +54,7 @@ class AudioPipelineService : Service() {
     private var mixer: AudioSessionMixer? = null
     @Volatile private var serviceStarted = false
     private val selfTestRunning = AtomicBoolean(false)
+    @Volatile private var activeDsd: ActiveDsd? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var playbackWakeLock: PowerManager.WakeLock? = null
@@ -50,6 +64,10 @@ class AudioPipelineService : Service() {
             val selected = PipelineStore.state.value.selectedRouteId
             // Claiming a direct USB interface removes the Android mixer port intentionally.
             if (UsbHostController.isDirectRoute(selected) && UsbHostController.isDirectDeviceConnected(selected)) return
+            if (activeDsd != null) {
+                stopDsd("Audio output disconnected during DSD playback")
+                return
+            }
             stopPipeline(false)
             PipelineStore.update { it.copy(lastError = "Audio output disconnected. Choose an output and start playback again.") }
         }
@@ -72,22 +90,27 @@ class AudioPipelineService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action ?: ACTION_START) {
             ACTION_START -> startPipeline()
-            ACTION_STOP -> stopPipeline(true)
+            ACTION_STOP -> {
+                stopDsd()
+                stopPipeline(true)
+            }
             ACTION_SELECT_ROUTE -> selectRoute(intent?.getIntExtra(EXTRA_ROUTE_ID, DEFAULT_ROUTE_ID) ?: DEFAULT_ROUTE_ID)
             ACTION_SELF_TEST -> runOutputSelfTest()
+            ACTION_PLAY_DSD -> intent?.let(::startDsd)
+            ACTION_PAUSE_DSD -> pauseDsd()
+            ACTION_RESUME_DSD -> resumeDsd()
+            ACTION_STOP_DSD -> stopDsd()
         }
-        return START_STICKY
+        if (!serviceStarted) stopSelfResult(startId)
+        return if (serviceStarted) START_STICKY else START_NOT_STICKY
     }
 
     private fun startPipeline() {
-        if (!serviceStarted) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Music space audio", NotificationManager.IMPORTANCE_LOW),
-            )
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Waiting for music"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-            serviceStarted = true
+        if (activeDsd?.thread?.isAlive == true) {
+            PipelineStore.log("Stop local DSD playback before starting the music-app bridge", LogLevel.WARNING)
+            return
         }
+        ensureForeground("Waiting for music")
         if (bridge != null) return
         val sessions = AudioSessionMixer(
             this, ::updateNotification,
@@ -135,6 +158,10 @@ class AudioPipelineService : Service() {
     }
 
     private fun selectRoute(routeId: Int) {
+        if (activeDsd != null) {
+            PipelineStore.log("Output changes are locked during local DSD playback", LogLevel.WARNING)
+            return
+        }
         val selected = routeId.takeUnless { it == DEFAULT_ROUTE_ID }
         mixer?.selectRoute(selected)
         PipelineStore.update { it.copy(selectedRouteId = selected) }
@@ -147,13 +174,21 @@ class AudioPipelineService : Service() {
         PipelineStore.update { it.copy(availableRoutes = available, selectedRouteId = selected) }
         if (selected != old) {
             if (serviceStarted && old != null) {
-                stopPipeline(false)
-                PipelineStore.update { it.copy(lastError = "Selected output disconnected. Playback stopped to avoid switching to a speaker.") }
+                if (activeDsd != null) {
+                    stopDsd("Selected output disconnected; DSD playback was stopped without falling back to a speaker")
+                } else {
+                    stopPipeline(false)
+                    PipelineStore.update { it.copy(lastError = "Selected output disconnected. Playback stopped to avoid switching to a speaker.") }
+                }
             } else mixer?.selectRoute(selected)
         }
     }
 
     private fun runOutputSelfTest() {
+        if (activeDsd?.thread?.isAlive == true) {
+            PipelineStore.log("Output self-test skipped during local DSD playback", LogLevel.WARNING)
+            return
+        }
         if (PipelineStore.state.value.guestConnected) {
             PipelineStore.log("Output self-test skipped while a music track is connected", LogLevel.WARNING)
             return
@@ -218,6 +253,12 @@ class AudioPipelineService : Service() {
     }
 
     override fun onDestroy() {
+        activeDsd?.let {
+            it.cancelError = "Audio service stopped"
+            it.task?.cancel()
+            runCatching { it.source?.close() }
+            it.thread.interrupt()
+        }
         scope.cancel()
         unregisterReceiver(noisyReceiver)
         audioManager.unregisterAudioDeviceCallback(deviceCallback)
@@ -231,16 +272,309 @@ class AudioPipelineService : Service() {
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stop = PendingIntent.getService(this, 1,
-            Intent(this, AudioPipelineService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle("VirtualDAP").setContentText(text)
-            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).addAction(0, "Stop", stop).build()
+            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
+        val dsd = PipelineStore.state.value.dsdPlayback
+        val stop = PendingIntent.getService(this, 1,
+            Intent(this, AudioPipelineService::class.java).setAction(
+                if (dsd.active) ACTION_STOP_DSD else ACTION_STOP,
+            ),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        if (dsd.phase == DsdPlaybackPhase.PLAYING) {
+            val pause = PendingIntent.getService(this, 2,
+                Intent(this, AudioPipelineService::class.java).setAction(ACTION_PAUSE_DSD),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            builder.addAction(0, "Pause", pause)
+        } else if (dsd.phase == DsdPlaybackPhase.PAUSED) {
+            val resume = PendingIntent.getService(this, 3,
+                Intent(this, AudioPipelineService::class.java).setAction(ACTION_RESUME_DSD),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            builder.addAction(0, "Resume", resume)
+        }
+        return builder.addAction(0, "Stop", stop).build()
     }
 
     private fun updateNotification(text: String) {
         if (serviceStarted) getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+    }
+
+    private fun ensureForeground(text: String) {
+        if (!serviceStarted) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Music space audio", NotificationManager.IMPORTANCE_LOW),
+            )
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification(text),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+            )
+            serviceStarted = true
+        } else updateNotification(text)
+    }
+
+    private fun startDsd(intent: Intent) {
+        val uri = intent.data
+        if (uri == null) {
+            failDsd("No DSD file was selected")
+            return
+        }
+        if (activeDsd?.thread?.isAlive == true) {
+            failDsd("A DSD file is already playing; stop it before selecting another")
+            return
+        }
+        if (selfTestRunning.get()) {
+            failDsd("Wait for the output self-test to finish before playing DSD")
+            return
+        }
+        val mode = runCatching {
+            DsdOutputMode.valueOf(intent.getStringExtra(EXTRA_DSD_MODE) ?: DsdOutputMode.PCM_CONVERSION.name)
+        }.getOrElse {
+            failDsd("Invalid DSD output mode")
+            return
+        }
+        val fileName = intent.getStringExtra(EXTRA_DSD_NAME)?.takeIf(String::isNotBlank)
+            ?: displayName(uri)
+            ?: "Selected DSD file"
+        if (bridge != null || mixer != null) stopPipeline(false)
+        ensureForeground("Preparing $fileName")
+        updatePlaybackWakeLock(true)
+        PipelineStore.update {
+            it.copy(
+                dsdPlayback = DsdPlaybackSnapshot(
+                    phase = DsdPlaybackPhase.PREPARING,
+                    fileName = fileName,
+                    mode = mode,
+                ),
+                lastError = null,
+            )
+        }
+
+        lateinit var active: ActiveDsd
+        val worker = thread(start = false, name = "VirtualDAP-DSD") {
+            var reader: com.virtualdap.host.audio.DsdStreamReader? = null
+            var packetOutput: DsdPacketOutput? = null
+            try {
+                val stream = contentResolver.openInputStream(uri)
+                    ?: error("Android could not open the selected file")
+                active.source = stream
+                val openedReader = DsdContainerReader.open(stream)
+                reader = openedReader
+                active.source = openedReader
+                if (active.cancelError != null || Thread.currentThread().isInterrupted) {
+                    throw CancellationException("DSD playback cancelled while opening the file")
+                }
+                val selectedRoute = PipelineStore.state.value.let { state ->
+                    state.availableRoutes.firstOrNull { it.id == state.selectedRouteId }
+                }
+                val openedOutput = when (mode) {
+                    DsdOutputMode.PCM_CONVERSION -> DsdPcmPacketOutput(
+                        this,
+                        PipelineStore.state.value.selectedRouteId,
+                        openedReader.format,
+                    )
+                    DsdOutputMode.NATIVE_DSD,
+                    DsdOutputMode.DOP -> {
+                        val route = selectedRoute?.takeIf { it.directUsbDeviceId != null }
+                            ?: error("Native DSD and DoP require a selected Exclusive USB output")
+                        DirectDsdPacketOutput(
+                            requireNotNull(route.directUsbDeviceId),
+                            route,
+                            openedReader.format,
+                            mode,
+                            intent.getBooleanExtra(EXTRA_DOP_CONFIRMED, false),
+                        )
+                    }
+                }
+                packetOutput = openedOutput
+                val outputSnapshot = dsdOutputSnapshot(openedOutput, selectedRoute)
+                PipelineStore.update { state ->
+                    if (activeDsd !== active) state else state.copy(
+                        dsdPlayback = state.dsdPlayback.copy(
+                            format = openedReader.format,
+                            sampleCountPerChannel = openedReader.sampleCountPerChannel,
+                            durationMillis = openedReader.durationMillis,
+                            outputFormat = outputSnapshot.outputFormat,
+                            outputRoute = outputSnapshot.route,
+                            transportRate = outputSnapshot.transportRate,
+                            qualification = outputSnapshot.qualification,
+                        ),
+                    )
+                }
+                val task = DsdPlaybackTask(openedReader, openedOutput) { event ->
+                    handleDsdEvent(active, openedOutput, event)
+                }
+                active.task = task
+                if (active.cancelError != null) task.cancel()
+                task.run()
+                active.source = null
+                reader = null
+                packetOutput = null
+            } catch (failure: Throwable) {
+                runCatching { reader?.close() }
+                runCatching { packetOutput?.close() }
+                if (active.cancelError != null || failure is CancellationException) {
+                    handleDsdEvent(active, packetOutput, DsdPlaybackEvent.Cancelled)
+                } else {
+                    handleDsdEvent(active, packetOutput, DsdPlaybackEvent.Failed(failure))
+                }
+            }
+        }
+        active = ActiveDsd(worker)
+        activeDsd = active
+        worker.start()
+    }
+
+    private data class DsdOutputSnapshot(
+        val outputFormat: PcmFormat?,
+        val route: com.virtualdap.host.model.OutputRoute?,
+        val transportRate: Int?,
+        val qualification: String?,
+    )
+
+    private fun dsdOutputSnapshot(output: DsdPacketOutput?, fallbackRoute: com.virtualdap.host.model.OutputRoute?) =
+        when (output) {
+            is DirectDsdPacketOutput -> DsdOutputSnapshot(
+                null,
+                output.routedOutput() ?: fallbackRoute,
+                output.configuration.transportRate,
+                output.configuration.qualification,
+            )
+            is DsdPcmPacketOutput -> DsdOutputSnapshot(
+                output.configuration.configured,
+                output.routedOutput() ?: fallbackRoute,
+                null,
+                "DSD converted to PCM with a stateful 96-tap low-pass filter",
+            )
+            else -> DsdOutputSnapshot(null, fallbackRoute, null, null)
+        }
+
+    private fun handleDsdEvent(active: ActiveDsd, output: DsdPacketOutput?, event: DsdPlaybackEvent) {
+        if (activeDsd !== active) return
+        val outputState = dsdOutputSnapshot(output, PipelineStore.state.value.dsdPlayback.outputRoute)
+        val stats = when (output) {
+            is DirectDsdPacketOutput -> output.statistics()
+            is DsdPcmPacketOutput -> output.statistics()
+            else -> null
+        }
+        val preserved = output is DirectDsdPacketOutput && output.sourcePreservedActive()
+        when (event) {
+            is DsdPlaybackEvent.Started -> {
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
+                PipelineStore.log("DSD playback started: ${event.format.shortLabel()} via ${PipelineStore.state.value.dsdPlayback.mode.name}")
+                updateNotification("Playing ${PipelineStore.state.value.dsdPlayback.fileName}")
+            }
+            is DsdPlaybackEvent.Progress -> {
+                val now = SystemClock.elapsedRealtime()
+                if (event.samplePosition == event.sampleCountPerChannel || now - active.lastProgressAt >= 100) {
+                    active.lastProgressAt = now
+                    PipelineStore.update {
+                        it.copy(dsdPlayback = it.dsdPlayback.copy(
+                            samplePosition = event.samplePosition,
+                            outputRoute = outputState.route,
+                            sourcePreserved = preserved,
+                            outputUnderruns = stats?.underruns ?: 0,
+                        ))
+                    }
+                }
+            }
+            DsdPlaybackEvent.Paused -> {
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PAUSED)) }
+                mainHandler.post { updatePlaybackWakeLock(false) }
+                updateNotification("DSD playback paused")
+            }
+            DsdPlaybackEvent.Resumed -> {
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
+                mainHandler.post { updatePlaybackWakeLock(true) }
+                updateNotification("Playing ${PipelineStore.state.value.dsdPlayback.fileName}")
+            }
+            DsdPlaybackEvent.Completed -> {
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(
+                    phase = DsdPlaybackPhase.COMPLETED,
+                    samplePosition = it.dsdPlayback.sampleCountPerChannel,
+                    outputRoute = outputState.route,
+                    sourcePreserved = preserved,
+                    outputUnderruns = stats?.underruns ?: 0,
+                )) }
+                PipelineStore.log("DSD playback completed")
+                finishDsd(active)
+            }
+            DsdPlaybackEvent.Cancelled -> {
+                val reason = active.cancelError
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(
+                    phase = if (reason == null) DsdPlaybackPhase.IDLE else DsdPlaybackPhase.ERROR,
+                    lastError = reason,
+                )) }
+                PipelineStore.log(reason ?: "DSD playback stopped", if (reason == null) LogLevel.INFO else LogLevel.ERROR)
+                finishDsd(active)
+            }
+            is DsdPlaybackEvent.Failed -> {
+                val message = event.error.message ?: event.error.javaClass.simpleName
+                PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(
+                    phase = DsdPlaybackPhase.ERROR,
+                    lastError = message,
+                )) }
+                PipelineStore.log("DSD playback failed: $message", LogLevel.ERROR)
+                finishDsd(active)
+            }
+        }
+    }
+
+    private fun pauseDsd() {
+        val active = activeDsd ?: return
+        if (PipelineStore.state.value.dsdPlayback.phase == DsdPlaybackPhase.PLAYING) active.task?.pause()
+    }
+
+    private fun resumeDsd() {
+        val active = activeDsd ?: return
+        if (PipelineStore.state.value.dsdPlayback.phase == DsdPlaybackPhase.PAUSED) active.task?.resume()
+    }
+
+    private fun stopDsd(error: String? = null) {
+        val active = activeDsd ?: return
+        active.cancelError = error
+        PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.STOPPING)) }
+        active.task?.cancel()
+        runCatching { active.source?.close() }
+        active.thread.interrupt()
+    }
+
+    private fun finishDsd(active: ActiveDsd) {
+        if (activeDsd === active) activeDsd = null
+        mainHandler.post {
+            updatePlaybackWakeLock(false)
+            if (activeDsd == null && bridge == null) {
+                if (serviceStarted) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                serviceStarted = false
+                stopSelf()
+            }
+        }
+    }
+
+    private fun failDsd(message: String) {
+        PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(
+            phase = DsdPlaybackPhase.ERROR,
+            lastError = message,
+        )) }
+        PipelineStore.log(message, LogLevel.ERROR)
+    }
+
+    private fun displayName(uri: Uri): String? = runCatching {
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            if (cursor?.moveToFirst() == true) cursor.getString(0) else null
+        } finally {
+            cursor?.close()
+        }
+    }.getOrNull()
+
+    private class ActiveDsd(val thread: Thread) {
+        @Volatile var task: DsdPlaybackTask? = null
+        @Volatile var source: Closeable? = null
+        @Volatile var cancelError: String? = null
+        var lastProgressAt: Long = 0
     }
 
     companion object {
@@ -248,7 +582,14 @@ class AudioPipelineService : Service() {
         const val ACTION_STOP = "com.virtualdap.host.action.STOP"
         const val ACTION_SELECT_ROUTE = "com.virtualdap.host.action.SELECT_ROUTE"
         const val ACTION_SELF_TEST = "com.virtualdap.host.action.SELF_TEST"
+        const val ACTION_PLAY_DSD = "com.virtualdap.host.action.PLAY_DSD"
+        const val ACTION_PAUSE_DSD = "com.virtualdap.host.action.PAUSE_DSD"
+        const val ACTION_RESUME_DSD = "com.virtualdap.host.action.RESUME_DSD"
+        const val ACTION_STOP_DSD = "com.virtualdap.host.action.STOP_DSD"
         const val EXTRA_ROUTE_ID = "route_id"
+        const val EXTRA_DSD_MODE = "dsd_mode"
+        const val EXTRA_DOP_CONFIRMED = "dop_confirmed"
+        const val EXTRA_DSD_NAME = "dsd_name"
         const val DEFAULT_ROUTE_ID = -1
         private const val CHANNEL_ID = "virtualdap_audio"
         private const val NOTIFICATION_ID = 42
@@ -256,8 +597,25 @@ class AudioPipelineService : Service() {
         fun command(context: Context, action: String, routeId: Int? = null) {
             val intent = Intent(context, AudioPipelineService::class.java).setAction(action)
             routeId?.let { intent.putExtra(EXTRA_ROUTE_ID, it) }
-            if (action == ACTION_START || action == ACTION_SELF_TEST) context.startForegroundService(intent)
+            if (action == ACTION_START || action == ACTION_SELF_TEST || action == ACTION_PLAY_DSD) context.startForegroundService(intent)
             else context.startService(intent)
+        }
+
+        fun playDsd(
+            context: Context,
+            uri: Uri,
+            mode: DsdOutputMode,
+            dopCapabilityConfirmed: Boolean,
+            displayName: String? = null,
+        ) {
+            val intent = Intent(context, AudioPipelineService::class.java)
+                .setAction(ACTION_PLAY_DSD)
+                .setData(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .putExtra(EXTRA_DSD_MODE, mode.name)
+                .putExtra(EXTRA_DOP_CONFIRMED, dopCapabilityConfirmed)
+            displayName?.let { intent.putExtra(EXTRA_DSD_NAME, it) }
+            context.startForegroundService(intent)
         }
     }
 }

@@ -2,9 +2,13 @@ package com.virtualdap.host
 
 import android.annotation.SuppressLint
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -41,8 +45,10 @@ import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -53,6 +59,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,11 +68,13 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -97,7 +106,9 @@ import com.virtualdap.host.guest.GuestServices
 import com.virtualdap.host.container.ContainerPhase
 import com.virtualdap.host.container.ContainerRuntime
 import com.virtualdap.host.container.ContainerSnapshot
+import com.virtualdap.host.audio.DsdOutputMode
 import com.virtualdap.host.model.AppAudioPath
+import com.virtualdap.host.model.DsdPlaybackPhase
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.MusicAppCatalog
 import com.virtualdap.host.model.OutputRoute
@@ -140,15 +151,44 @@ private fun VirtualDAPApp() {
     var selectedSection by rememberSaveable { mutableStateOf(AppSection.PLAYER) }
     var pendingPermissionAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
     var pendingPackageName by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedDsdUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedDsdName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDsdUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDsdName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDsdMode by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION.name) }
+    var pendingDopConfirmation by rememberSaveable { mutableStateOf(false) }
     val bundlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(ContainerRuntime::install)
+    }
+    val dsdPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }.onFailure {
+                PipelineStore.log("The selected DSD file grant lasts only for this app session", LogLevel.WARNING)
+            }
+            selectedDsdUri = uri.toString()
+            selectedDsdName = queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "Selected DSD file"
+        }
     }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
-        AudioPipelineService.command(context, pendingPermissionAction)
+        if (pendingPermissionAction == AudioPipelineService.ACTION_PLAY_DSD) {
+            pendingDsdUri?.let(Uri::parse)?.let { uri ->
+                AudioPipelineService.playDsd(
+                    context,
+                    uri,
+                    DsdOutputMode.valueOf(pendingDsdMode),
+                    pendingDopConfirmation,
+                    pendingDsdName,
+                )
+            }
+        } else AudioPipelineService.command(context, pendingPermissionAction)
         pendingPackageName?.let(ContainerRuntime::launch)
         pendingPackageName = null
+        pendingDsdUri = null
+        pendingDsdName = null
     }
 
     fun startWithPermission(action: String, packageName: String? = null) {
@@ -162,6 +202,20 @@ private fun VirtualDAPApp() {
             AudioPipelineService.command(context, action)
             packageName?.let(ContainerRuntime::launch)
         }
+    }
+
+    fun playDsdWithPermission(mode: DsdOutputMode, dopConfirmed: Boolean) {
+        val uri = selectedDsdUri?.let(Uri::parse) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPermissionAction = AudioPipelineService.ACTION_PLAY_DSD
+            pendingDsdUri = uri.toString()
+            pendingDsdName = selectedDsdName
+            pendingDsdMode = mode.name
+            pendingDopConfirmation = dopConfirmed
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else AudioPipelineService.playDsd(context, uri, mode, dopConfirmed, selectedDsdName)
     }
 
     Scaffold(
@@ -194,6 +248,21 @@ private fun VirtualDAPApp() {
             when (section) {
                 AppSection.PLAYER -> PlayerScreen(
                     snapshot = snapshot,
+                    selectedDsdName = selectedDsdName,
+                    hasSelectedDsd = selectedDsdUri != null,
+                    onChooseDsd = {
+                        dsdPicker.launch(arrayOf("audio/*", "application/octet-stream"))
+                    },
+                    onPlayDsd = ::playDsdWithPermission,
+                    onPauseDsd = {
+                        AudioPipelineService.command(context, AudioPipelineService.ACTION_PAUSE_DSD)
+                    },
+                    onResumeDsd = {
+                        AudioPipelineService.command(context, AudioPipelineService.ACTION_RESUME_DSD)
+                    },
+                    onStopDsd = {
+                        AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP_DSD)
+                    },
                     onStart = { startWithPermission(AudioPipelineService.ACTION_START) },
                     onStop = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP) },
                     onSelectRoute = { route ->
@@ -569,6 +638,13 @@ private fun ScreenHeader(eyebrow: String, title: String, subtitle: String) {
 @Composable
 private fun PlayerScreen(
     snapshot: PipelineSnapshot,
+    selectedDsdName: String?,
+    hasSelectedDsd: Boolean,
+    onChooseDsd: () -> Unit,
+    onPlayDsd: (DsdOutputMode, Boolean) -> Unit,
+    onPauseDsd: () -> Unit,
+    onResumeDsd: () -> Unit,
+    onStopDsd: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSelectRoute: (OutputRoute?) -> Unit,
@@ -586,6 +662,18 @@ private fun PlayerScreen(
             )
         }
         item { PipelineHero(snapshot, onStart, onStop) }
+        item {
+            DsdFilePlayer(
+                snapshot = snapshot,
+                selectedFileName = selectedDsdName,
+                hasSelectedFile = hasSelectedDsd,
+                onChooseFile = onChooseDsd,
+                onPlay = onPlayDsd,
+                onPause = onPauseDsd,
+                onResume = onResumeDsd,
+                onStop = onStopDsd,
+            )
+        }
         item { SignalChain(snapshot) }
         item { StreamDetails(snapshot) }
         item { OutputSelector(snapshot, onSelectRoute) }
@@ -635,6 +723,7 @@ private fun PipelineHero(snapshot: PipelineSnapshot, onStart: () -> Unit, onStop
             }
             Button(
                 onClick = if (snapshot.enabled) onStop else onStart,
+                enabled = !snapshot.dsdPlayback.active,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (snapshot.enabled) MaterialTheme.colorScheme.surfaceVariant else Amber,
                     contentColor = if (snapshot.enabled) MaterialTheme.colorScheme.onSurface else Ink,
@@ -648,6 +737,208 @@ private fun PipelineHero(snapshot: PipelineSnapshot, onStart: () -> Unit, onStop
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(if (snapshot.enabled) "Stop" else "Start")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DsdFilePlayer(
+    snapshot: PipelineSnapshot,
+    selectedFileName: String?,
+    hasSelectedFile: Boolean,
+    onChooseFile: () -> Unit,
+    onPlay: (DsdOutputMode, Boolean) -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit,
+) {
+    var selectedModeName by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION.name) }
+    var dopConfirmed by rememberSaveable { mutableStateOf(false) }
+    val selectedMode = DsdOutputMode.valueOf(selectedModeName)
+    val playback = snapshot.dsdPlayback
+    val directRouteSelected = snapshot.availableRoutes
+        .firstOrNull { it.id == snapshot.selectedRouteId }
+        ?.directUsbDeviceId != null
+    val controlsLocked = playback.active
+    val routeReady = selectedMode == DsdOutputMode.PCM_CONVERSION || directRouteSelected
+    val dopReady = selectedMode != DsdOutputMode.DOP || dopConfirmed
+    val canPlay = hasSelectedFile && !controlsLocked && !snapshot.guestConnected && routeReady && dopReady
+
+    SectionCard(title = "Local DSD file", icon = Icons.Rounded.FolderOpen) {
+        Text(
+            "Streams validated DSF or uncompressed DSDIFF. Local-file playback is separate from Apple Music, Spotify and other app audio.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Muted,
+        )
+        Spacer(Modifier.height(12.dp))
+        Surface(
+            color = Color.White.copy(alpha = 0.04f),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.LibraryMusic, contentDescription = null, tint = Amber)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        playback.fileName.takeIf { playback.active } ?: selectedFileName ?: "No DSD file selected",
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text("Content signature is checked before output starts", style = MaterialTheme.typography.bodySmall, color = Muted)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onChooseFile, enabled = !controlsLocked, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Rounded.FolderOpen, contentDescription = null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text(if (hasSelectedFile) "Choose another file" else "Choose DSF / DSDIFF")
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Text("OUTPUT MODE", style = MaterialTheme.typography.labelSmall, color = Muted, letterSpacing = 1.sp)
+        Spacer(Modifier.height(7.dp))
+        DsdModeOption(
+            selected = selectedMode == DsdOutputMode.PCM_CONVERSION,
+            enabled = !controlsLocked,
+            title = "DSD → PCM",
+            detail = "96-tap DSD low-pass conversion, then the selected Android or USB PCM output",
+            onClick = { selectedModeName = DsdOutputMode.PCM_CONVERSION.name },
+        )
+        DsdModeOption(
+            selected = selectedMode == DsdOutputMode.NATIVE_DSD,
+            enabled = !controlsLocked,
+            title = "Native DSD",
+            detail = "Direct USB only; requires an exact, reference-qualified DAC wire layout",
+            onClick = { selectedModeName = DsdOutputMode.NATIVE_DSD.name },
+        )
+        DsdModeOption(
+            selected = selectedMode == DsdOutputMode.DOP,
+            enabled = !controlsLocked,
+            title = "DoP 1.1",
+            detail = "Direct USB 24-bit carrier with no volume, mixer or resampler",
+            onClick = { selectedModeName = DsdOutputMode.DOP.name },
+        )
+
+        if (selectedMode == DsdOutputMode.DOP) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = dopConfirmed,
+                    onCheckedChange = { dopConfirmed = it },
+                    enabled = !controlsLocked,
+                )
+                Text(
+                    "I verified that this DAC supports DoP at the required carrier rate.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Muted,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (!routeReady) {
+            Text(
+                "Choose an Exclusive USB output below for native DSD or DoP.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Amber,
+            )
+        }
+        if (snapshot.guestConnected) {
+            Text(
+                "Stop the currently connected music app before starting a local DSD file.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Amber,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        if (!playback.active) {
+            Button(
+                onClick = { onPlay(selectedMode, dopConfirmed) },
+                enabled = canPlay,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(7.dp))
+                Text("Play DSD file")
+            }
+        } else {
+            LinearProgressIndicator(
+                progress = { playback.progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = Amber,
+                trackColor = Color.White.copy(alpha = 0.08f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = if (playback.phase == DsdPlaybackPhase.PAUSED) onResume else onPause,
+                    enabled = playback.phase == DsdPlaybackPhase.PLAYING || playback.phase == DsdPlaybackPhase.PAUSED,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        if (playback.phase == DsdPlaybackPhase.PAUSED) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (playback.phase == DsdPlaybackPhase.PAUSED) "Resume" else "Pause")
+                }
+                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Stop")
+                }
+            }
+        }
+
+        if (playback.format != null) {
+            Spacer(Modifier.height(13.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+            Spacer(Modifier.height(8.dp))
+            DiagnosticLine("State", dsdPhaseLabel(playback.phase))
+            DiagnosticLine("Source", playback.format.shortLabel())
+            DiagnosticLine("Position", "${durationLabel(sampleDurationMillis(playback.samplePosition, playback.format.sampleRate))} / ${durationLabel(playback.durationMillis)}")
+            DiagnosticLine("Mode", dsdModeLabel(playback.mode))
+            playback.outputFormat?.let { DiagnosticLine("PCM output", it.shortLabel()) }
+            playback.transportRate?.let { DiagnosticLine("USB transport", "${it / 1_000.0} kHz") }
+            playback.outputRoute?.let { DiagnosticLine("Routed output", it.name) }
+            playback.qualification?.let { DiagnosticLine("Qualification", it) }
+            if (playback.mode != DsdOutputMode.PCM_CONVERSION) {
+                DiagnosticLine("Source preserved", if (playback.sourcePreserved) "Verified in clean completed transfers" else "Not yet verified")
+                DiagnosticLine("USB underruns", playback.outputUnderruns.toString())
+            }
+        }
+        playback.lastError?.let { error ->
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun DsdModeOption(
+    selected: Boolean,
+    enabled: Boolean,
+    title: String,
+    detail: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = if (selected) Amber.copy(alpha = 0.11f) else Color.Transparent,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = Muted)
             }
         }
     }
@@ -759,15 +1050,16 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
 @Composable
 private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRoute?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val enabled = !snapshot.dsdPlayback.active
     SectionCard(title = "Output device", icon = Icons.Rounded.Usb) {
         ExposedDropdownMenuBox(
             expanded = expanded,
-            onExpandedChange = { if (snapshot.enabled) expanded = !expanded },
+            onExpandedChange = { if (enabled) expanded = !expanded },
         ) {
             Surface(
                 modifier = Modifier.fillMaxWidth()
-                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, snapshot.enabled),
-                onClick = { if (snapshot.enabled) expanded = true },
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled),
+                onClick = { if (enabled) expanded = true },
                 color = Color.White.copy(alpha = 0.04f),
                 shape = RoundedCornerShape(14.dp),
             ) {
@@ -788,7 +1080,7 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            if (snapshot.enabled) "Tap to choose a route" else "Start the pipeline to choose a route",
+                            if (enabled) "Tap to choose a route" else "Stop DSD playback before changing output",
                             style = MaterialTheme.typography.bodySmall,
                             color = Muted,
                         )
@@ -1070,6 +1362,37 @@ private fun phaseLabel(phase: PipelinePhase): String = when (phase) {
     PipelinePhase.PAUSED -> "Paused"
     PipelinePhase.ERROR -> "Needs attention"
 }
+
+private fun dsdPhaseLabel(phase: DsdPlaybackPhase): String = when (phase) {
+    DsdPlaybackPhase.IDLE -> "Stopped"
+    DsdPlaybackPhase.PREPARING -> "Preparing"
+    DsdPlaybackPhase.PLAYING -> "Playing"
+    DsdPlaybackPhase.PAUSED -> "Paused"
+    DsdPlaybackPhase.STOPPING -> "Stopping"
+    DsdPlaybackPhase.COMPLETED -> "Completed"
+    DsdPlaybackPhase.ERROR -> "Needs attention"
+}
+
+private fun dsdModeLabel(mode: DsdOutputMode): String = when (mode) {
+    DsdOutputMode.PCM_CONVERSION -> "DSD → PCM"
+    DsdOutputMode.NATIVE_DSD -> "Native DSD"
+    DsdOutputMode.DOP -> "DoP 1.1"
+}
+
+private fun durationLabel(milliseconds: Long): String {
+    val seconds = milliseconds.coerceAtLeast(0L) / 1_000L
+    return "%d:%02d".format(seconds / 60L, seconds % 60L)
+}
+
+private fun sampleDurationMillis(samples: Long, sampleRate: Int): Long =
+    samples / sampleRate * 1_000L + samples % sampleRate * 1_000L / sampleRate
+
+private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+    }
+}.getOrNull()
 
 private fun guestPhaseLabel(phase: GuestRuntimePhase): String = when (phase) {
     GuestRuntimePhase.NOT_INSTALLED -> "No guest image"

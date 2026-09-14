@@ -75,7 +75,9 @@ playback-speed/effect semantics, static AudioTrack, AAudio/OpenSL ES, app-specif
 tests and wider Android API/ABI runtime coverage.
 An opt-in exclusive USB PCM transport is now integrated; see [USB output](USB_OUTPUT.md).
 Its single-stream and hardware-validation limits remain distinct from Android's mixed output path.
-Native DSD/DoP source integration and device qualification are still incomplete.
+Streaming apps remain PCM sources at this capture boundary. Local DSF/DSDIFF playback has a
+separate product-facing native DSD/DoP path with reference-qualified device layouts; it does not
+relabel a service's decoded PCM as DSD.
 
 API signatures are checked against
 [AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java).

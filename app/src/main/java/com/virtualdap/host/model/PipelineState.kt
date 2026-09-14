@@ -1,6 +1,8 @@
 package com.virtualdap.host.model
 
 import com.virtualdap.host.audio.PcmFormat
+import com.virtualdap.host.audio.DsdFormat
+import com.virtualdap.host.audio.DsdOutputMode
 
 enum class PipelinePhase {
     STOPPED,
@@ -12,6 +14,16 @@ enum class PipelinePhase {
 }
 
 enum class LogLevel { INFO, WARNING, ERROR }
+
+enum class DsdPlaybackPhase {
+    IDLE,
+    PREPARING,
+    PLAYING,
+    PAUSED,
+    STOPPING,
+    COMPLETED,
+    ERROR,
+}
 
 data class PipelineLog(
     val timestampMillis: Long,
@@ -28,6 +40,32 @@ data class OutputRoute(
     val encodings: List<Int>,
     val directUsbDeviceId: Int? = null,
 )
+
+data class DsdPlaybackSnapshot(
+    val phase: DsdPlaybackPhase = DsdPlaybackPhase.IDLE,
+    val fileName: String? = null,
+    val format: DsdFormat? = null,
+    val mode: DsdOutputMode = DsdOutputMode.PCM_CONVERSION,
+    val samplePosition: Long = 0,
+    val sampleCountPerChannel: Long = 0,
+    val durationMillis: Long = 0,
+    val outputFormat: PcmFormat? = null,
+    val outputRoute: OutputRoute? = null,
+    val transportRate: Int? = null,
+    val qualification: String? = null,
+    val sourcePreserved: Boolean = false,
+    val outputUnderruns: Long = 0,
+    val lastError: String? = null,
+) {
+    val active: Boolean get() = phase in setOf(
+        DsdPlaybackPhase.PREPARING,
+        DsdPlaybackPhase.PLAYING,
+        DsdPlaybackPhase.PAUSED,
+        DsdPlaybackPhase.STOPPING,
+    )
+    val progress: Float get() = if (sampleCountPerChannel <= 0) 0f else
+        (samplePosition.toDouble() / sampleCountPerChannel).coerceIn(0.0, 1.0).toFloat()
+}
 
 data class PipelineSnapshot(
     val enabled: Boolean = false,
@@ -54,5 +92,6 @@ data class PipelineSnapshot(
     val reconnectCount: Long = 0,
     val latencyMs: Double? = null,
     val lastError: String? = null,
+    val dsdPlayback: DsdPlaybackSnapshot = DsdPlaybackSnapshot(),
     val logs: List<PipelineLog> = emptyList(),
 )

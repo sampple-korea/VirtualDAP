@@ -77,6 +77,8 @@ class DirectUsbDsdSinkTest {
             assertTrue(output.sourcePreservedActive())
             assertEquals(route, output.routedOutput())
             output.finish()
+            assertTrue(output.sourcePreservedActive())
+            assertEquals(route, output.routedOutput())
         }
         assertEquals(88_200, transport.startedAt)
         assertEquals(1, transport.drains)

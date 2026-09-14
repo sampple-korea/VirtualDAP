@@ -35,6 +35,8 @@ class DirectUsbDsdSink(
     private var frameBytes = 0
     private var playing = true
     private var suspendedStatistics: UsbOutputStatistics? = null
+    private var suspendedFeedbackRequired = false
+    private var completedCleanly = false
 
     fun setPlaying(value: Boolean) {
         playing = value
@@ -50,6 +52,8 @@ class DirectUsbDsdSink(
         configuration?.takeIf { it.source == source && it.mode == mode }?.let { return it }
         finish()
         suspendedStatistics = null
+        suspendedFeedbackRequired = false
+        completedCleanly = false
 
         var selectedNative: NativeCandidate? = null
         var selectedDop: DopCandidate? = null
@@ -92,6 +96,8 @@ class DirectUsbDsdSink(
             if (!playing) opened.output.pause()
             connection = opened
             suspendedStatistics = null
+            suspendedFeedbackRequired = false
+            completedCleanly = false
             return DirectDsdConfiguration(source, mode, transportRate, route, qualification)
                 .also { configuration = it }
         } catch (failure: Exception) {
@@ -122,9 +128,11 @@ class DirectUsbDsdSink(
 
     fun sourcePreservedActive(): Boolean {
         val stats = statistics() ?: return false
-        return connection != null && stats.error == 0 && stats.completedFrames > 0 &&
+        val feedbackRequired = connection?.output?.profile?.feedbackEndpointAddress != null ||
+            (connection == null && suspendedFeedbackRequired)
+        return (connection != null || completedCleanly) && stats.error == 0 && stats.completedFrames > 0 &&
             stats.underruns == 0L &&
-            (connection?.output?.profile?.feedbackEndpointAddress == null || stats.feedbackPackets > 0)
+            (!feedbackRequired || stats.feedbackPackets > 0)
     }
 
     fun routedOutput(): OutputRoute? = route.takeIf { (statistics()?.completedFrames ?: 0) > 0 }
@@ -147,6 +155,8 @@ class DirectUsbDsdSink(
             connection?.output?.let {
                 it.drain()
                 suspendedStatistics = it.statistics()
+                suspendedFeedbackRequired = it.profile.feedbackEndpointAddress != null
+                completedCleanly = true
             }
         } finally {
             close()

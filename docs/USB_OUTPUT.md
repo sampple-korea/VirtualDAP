@@ -53,10 +53,10 @@ the PCM path. Clock selectors/multipliers, implicit-feedback endpoints and vendo
 native-DSD quirks require further integration. The first matching PCM profile is tried; alternative
 retry after a clock rejection is not yet implemented.
 
-Native DSD/DoP framing, qualified mode selection and direct transport composition are implemented
-and JVM-tested, but no product-facing DSF/DSDIFF reader currently invokes that sink. A generic RAW
-descriptor or high PCM rate is never treated as proof of DSD support. ITF mode-switch devices and
-other vendor sequences remain disabled until their control transactions are implemented.
+Native DSD/DoP framing, qualified mode selection and direct transport composition are invoked by
+the foreground DSF/DSDIFF player and JVM-tested. A generic RAW descriptor or high PCM rate is never
+treated as proof of DSD support. ITF mode-switch devices and other vendor sequences remain disabled
+until their control transactions are implemented.
 
 ## Validation without a DAC
 
