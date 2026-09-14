@@ -161,7 +161,7 @@ class ContainerInstrumentedTest {
             }
             val splitSet = File(context.cacheDir, "instrumented-music-split-set.apks")
             try {
-                instrumentation.context.assets.open("music-fixture.apks").use { input ->
+                instrumentation.context.assets.open("music-fixture-bundletool.apks").use { input ->
                     splitSet.outputStream().use { input.copyTo(it) }
                 }
                 ContainerRuntime.install(Uri.fromFile(splitSet))

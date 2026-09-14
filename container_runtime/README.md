@@ -23,7 +23,7 @@ explicitly routed to the host, whose provider checks the caller UID.
 
 - Integrated host/debug and separate music fixture APKs build successfully.
 - Host unit tests and lint pass.
-- Nine prepared-source privacy/native/signature/install integration regression checks pass.
+- Ten prepared-source privacy/native/signature/install integration regression checks pass.
 - Unrooted API 33 and API 36 x86_64 emulators install the independent fixture APK **inside** the music space,
   launches its Application/Activity in a container process, persists its private launch counter and
   reports the actual process startup back to the host. The fixture is not installed in Android's
@@ -40,6 +40,8 @@ explicitly routed to the host, whose provider checks the caller UID.
   on API 33 and 36, separate from the host build job.
 - Manifest-based split selection and atomic directory publication are implemented. The API 33
   instrumented fixture loads a class found only in a separately signed feature APK after an update.
+  The API 36 probe also imports the fixture from an official bundletool 1.18.3 APKS; CI exercises a
+  deterministic binary-`toc.pb` archive with incompatible ARM64 and compatible x86_64 variants.
   See [installation guarantees and scope](../docs/CONTAINER_INSTALLATION.md).
 
 ```sh
@@ -60,7 +62,8 @@ Java streaming/static PCM plus native AAudio and OpenSL ES output interception a
 [its scope and protocol](../docs/CONTAINER_AUDIO.md).
 Independent overlapping tracks, source formats and individual release are exercised on API 33/36.
 Streaming-service login/DRM compatibility, sample-aligned gapless transitions and broader
-split-delivery-format coverage still require implementation and validation. A successful app launch
-alone is not proof of original-format audio capture.
+commercial-app coverage still require implementation and validation. Encrypted/proprietary package
+wrappers, JSON-only bundletool tables and OBB/Play Asset Delivery installation are outside the current
+import path. A successful app launch alone is not proof of original-format audio capture.
 The integrated direct USB PCM path and its separate hardware-free validation are described in
 [USB output](../docs/USB_OUTPUT.md); physical DAC output has not been measured.

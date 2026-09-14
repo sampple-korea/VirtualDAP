@@ -356,7 +356,7 @@ private fun MusicSpaceScreen(
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = onImport, enabled = snapshot.phase == ContainerPhase.READY, modifier = Modifier.weight(1f)) {
-                        Text("Add APK / APKS")
+                        Text("Add app package")
                     }
                     OutlinedButton(onClick = onRefresh, enabled = !busy, modifier = Modifier.weight(1f)) {
                         Text("Refresh")
@@ -380,7 +380,7 @@ private fun MusicSpaceScreen(
             item {
                 SectionCard(title = "Ready for your music apps", icon = Icons.Rounded.LibraryMusic) {
                     Text(
-                        "Choose an APK or a split APK set (.apks). Installed apps will appear here with launch and stop controls.",
+                        "Choose an APK, APKS, or compatible XAPK/APKM file. Device-targeted bundletool variants are selected automatically.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Muted,
                     )

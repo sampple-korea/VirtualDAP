@@ -12,7 +12,6 @@ import com.virtualdap.host.service.PipelineStore
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
-import java.util.zip.ZipFile
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import com.virtualdap.host.model.MusicAppCatalog
@@ -194,10 +193,15 @@ object ContainerRuntime {
             try {
                 check(staging.mkdir()) { "Could not create the app import directory" }
                 var source = prepare(context, staging)
-                if (validateArchive(source)) {
-                    val bundle = File(staging, "package.apks")
-                    check(source.renameTo(bundle)) { "Could not stage the APK bundle" }
-                    source = bundle
+                val normalized = File(staging, "package.apks")
+                if (ApkArchiveNormalizer.normalizeIfArchive(
+                        source,
+                        normalized,
+                        bundletoolProfile(context),
+                        MAX_IMPORT_BYTES,
+                    )
+                ) {
+                    source = normalized
                 } else {
                     val info = context.packageManager.getPackageArchiveInfo(
                         source.path, PackageManager.PackageInfoFlags.of(0),
@@ -325,31 +329,26 @@ object ContainerRuntime {
         )
     }
 
-    /** Returns true for a bounded split-APK bundle, false for an ordinary APK. */
-    private fun validateArchive(file: File): Boolean {
-        ZipFile(file).use { zip ->
-            if (zip.getEntry("AndroidManifest.xml") != null) return false
-            val apks = zip.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }.toList()
-            require(apks.size in 1..256) { "No valid APK set was found" }
-            val names = hashSetOf<String>()
-            var total = 0L
-            val buffer = ByteArray(64 * 1024)
-            for (entry in apks) {
-                val name = entry.name.replace('\\', '/').substringAfterLast('/')
-                require(!name.contains("..") && names.add(name)) { "Ambiguous APK bundle filenames" }
-                zip.getInputStream(entry).use { input ->
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        require(total <= MAX_IMPORT_BYTES) { "Expanded APK set exceeds 2 GiB" }
-                    }
-                }
-            }
-            // Base/split identity is checked by the framework manifest parser in the container,
-            // not by trusting a particular filename inside this ZIP.
-            return true
-        }
+    private fun bundletoolProfile(context: Context): BundletoolDeviceProfile {
+        val processAbis = if (Process.is64Bit()) {
+            Build.SUPPORTED_64_BIT_ABIS
+        } else {
+            Build.SUPPORTED_32_BIT_ABIS
+        }.toList()
+        val glVersion = context.getSystemService(android.app.ActivityManager::class.java)
+            ?.deviceConfigurationInfo?.reqGlEsVersion ?: 0
+        val textureFormats = buildList {
+            // Android Extension Pack includes ASTC LDR; GLES 3.x includes ETC2/EAC.
+            if (context.packageManager.hasSystemFeature("android.hardware.opengles.aep")) add(9)
+            if (glVersion >= 0x0003_0000) add(10)
+            add(1) // ETC1 fallback used by bundletool for older/basic devices.
+        }.distinct()
+        return BundletoolDeviceProfile(
+            sdkVersion = Build.VERSION.SDK_INT,
+            supportedAbis = processAbis,
+            screenDensityDpi = context.resources.displayMetrics.densityDpi,
+            textureCompressionFormats = textureFormats,
+        )
     }
 
     private fun fail(message: String) {

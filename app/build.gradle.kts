@@ -1,3 +1,4 @@
+import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -5,6 +6,63 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+private fun testProtoBytes(vararg parts: ByteArray): ByteArray = ByteArrayOutputStream().use { output ->
+    parts.forEach(output::writeBytes)
+    output.toByteArray()
+}
+
+private fun testProtoVarint(input: Long): ByteArray {
+    var value = input
+    return ByteArrayOutputStream().use { output ->
+        while (value and -0x80L != 0L) {
+            output.write(((value and 0x7f) or 0x80).toInt())
+            value = value ushr 7
+        }
+        output.write(value.toInt())
+        output.toByteArray()
+    }
+}
+
+private fun testProtoMessage(number: Int, value: ByteArray): ByteArray = testProtoBytes(
+    testProtoVarint((number.toLong() shl 3) or 2),
+    testProtoVarint(value.size.toLong()),
+    value,
+)
+
+private fun testProtoString(number: Int, value: String): ByteArray =
+    testProtoMessage(number, value.toByteArray(Charsets.UTF_8))
+
+private fun testProtoNumber(number: Int, value: Long): ByteArray = testProtoBytes(
+    testProtoVarint(number.toLong() shl 3),
+    testProtoVarint(value),
+)
+
+private fun testBundletoolModule(name: String, delivery: Int, path: String): ByteArray {
+    val metadata = testProtoBytes(testProtoString(1, name), testProtoNumber(6, delivery.toLong()))
+    val description = testProtoBytes(testProtoString(2, path), testProtoMessage(3, byteArrayOf()))
+    return testProtoBytes(testProtoMessage(1, metadata), testProtoMessage(2, description))
+}
+
+private fun testBundletoolVariant(abi: Int, alternative: Int, prefix: String): ByteArray {
+    val abiTargeting = testProtoBytes(
+        testProtoMessage(1, testProtoNumber(1, abi.toLong())),
+        testProtoMessage(2, testProtoNumber(1, alternative.toLong())),
+    )
+    val targeting = testProtoMessage(2, abiTargeting)
+    return testProtoBytes(
+        testProtoMessage(1, targeting),
+        testProtoMessage(2, testBundletoolModule("base", 1, "$prefix/base.apk")),
+        // Preserve a separately delivered decoder feature so class loading proves cluster parsing.
+        testProtoMessage(2, testBundletoolModule("decoder", 2, "$prefix/feature.apk")),
+    )
+}
+
+private fun testBundletoolToc(): ByteArray = testProtoBytes(
+    testProtoMessage(1, testBundletoolVariant(3, 5, "variants/arm64")),
+    testProtoMessage(1, testBundletoolVariant(5, 3, "variants/x86_64")),
+    testProtoString(4, "com.virtualdap.fixture.music"),
+)
 
 val prepareUsbLicense = tasks.register<Copy>("prepareUsbLicense") {
     from(rootProject.file("third_party/libusb/COPYING"))
@@ -27,6 +85,21 @@ val prepareMusicFixture = tasks.register("prepareMusicFixture") {
                 zip.putNextEntry(ZipEntry(name))
                 file.get().asFile.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
+            }
+        }
+        ZipOutputStream(directory.resolve("music-fixture-bundletool.apks").outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("toc.pb"))
+            zip.write(testBundletoolToc())
+            zip.closeEntry()
+            for ((prefix, base, feature) in listOf(
+                Triple("variants/arm64", baseApk, featureApk),
+                Triple("variants/x86_64", baseApk, featureApk),
+            )) {
+                for ((name, file) in listOf("$prefix/base.apk" to base, "$prefix/feature.apk" to feature)) {
+                    zip.putNextEntry(ZipEntry(name))
+                    file.get().asFile.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
         }
     }

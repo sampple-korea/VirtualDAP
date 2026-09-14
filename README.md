@@ -46,6 +46,13 @@ before any service is labeled verified.
 UAPP is an audio-engine implementation reference, not a catalog music service or runtime dependency.
 USB output, DoP, native DSD and DSD-to-PCM functionality belong inside VirtualDAP.
 
+The Music space accepts an ordinary APK, a standard bundletool APKS with binary `toc.pb`, or an
+unencrypted XAPK/APKM-style ZIP whose payload is plain APK files. For bundletool archives it selects
+one compatible non-instant variant from the current Android SDK, process ABI/multi-ABI, display
+density and available texture-compression signals before the manifest-based cluster installer
+validates package identity, signatures and native ABI. JSON-only tables, proprietary/encrypted
+wrappers and OBB/Play Asset Delivery payload installation are not supported.
+
 Subscriptions, regional restrictions, service login, Widevine, Play Integrity and guest image
 certification remain controlled by each provider. VirtualDAP does not bypass DRM or attestation.
 

@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PREPARED = ROOT / "container_runtime/core/build/generated/upstream"
 JAVA = PREPARED / "java/top/niunaijun/blackbox"
+APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
 class PreparedContainerTests(unittest.TestCase):
@@ -83,6 +84,19 @@ class PreparedContainerTests(unittest.TestCase):
         copier = (JAVA / "core/system/pm/installer/CopyExecutor.java").read_text()
         self.assertIn("AtomicPackagePublisher.publish", copier)
         self.assertNotIn("catch (Throwable ignored)", copier)
+
+    def test_device_targeted_apks_are_normalized_before_container_install(self):
+        runtime = (APP_JAVA / "container/ContainerRuntime.kt").read_text()
+        normalizer = (APP_JAVA / "container/ApkArchiveNormalizer.kt").read_text()
+        self.assertIn("ApkArchiveNormalizer.normalizeIfArchive", runtime)
+        self.assertIn("Build.SUPPORTED_64_BIT_ABIS", runtime)
+        self.assertNotIn("private fun validateArchive", runtime)
+        self.assertIn('entry.name == "toc.pb"', normalizer)
+        self.assertIn("BundletoolToc.select", normalizer)
+        self.assertIn("matchesMultiAbi", normalizer)
+        self.assertIn("matchesDensity", normalizer)
+        self.assertIn("MAX_ARCHIVE_ENTRIES", normalizer)
+        self.assertIn("JSON-only bundletool archives are not supported", normalizer)
 
 
 if __name__ == "__main__":
