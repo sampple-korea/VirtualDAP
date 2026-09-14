@@ -15,6 +15,8 @@ with zipfile.ZipFile(apk) as archive:
         b"Lcom/virtualdap/host/audio/NativeDsdEncoder;",
         b"Lcom/virtualdap/host/audio/OutputFormatPlanner;",
         b"Lcom/virtualdap/host/guest/",
+        b"Lcom/virtualdap/host/bridge/SharedRingBufferReader;",
+        b"Lcom/virtualdap/host/bridge/RingBufferLayout;",
         b"Lcom/virtualdap/runtime/IGuestRuntime",
     )
     for name in names:
