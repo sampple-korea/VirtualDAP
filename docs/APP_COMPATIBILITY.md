@@ -40,6 +40,34 @@ The full local API 36 suite was rerun after the permission declaration: 11 tests
 109.973 seconds. The debug build, lint, 98 JVM tests, 11 prepared-source checks and APK output
 boundary check also passed; none of these results substitutes for the failed commercial-app UI check.
 
+Follow-up CI run `34833833601` passed the host build but failed the API 34/36 runtime jobs
+(a foreground-service lifecycle error and a PCM-capture timeout). The test wait helper was found
+to execute successful button actions twice. It now returns on the first success, and container-test
+cleanup no longer creates an unused STOP-only production service. The local suite passed 12 tests
+in 50.354 seconds after these test changes; the CI matrix must be checked independently.
+Run `34837159352` subsequently passed the host debug/release build and both API 34/36 runtime jobs
+for commit `3e1c045`.
+
+## Real account and package results
+
+The consumer-source preparation excludes the synthetic authentication/account adapters: fabricated
+tokens, accounts and login-success fallbacks are not a service integration. Package-info lookup
+returns an actual installed container record, a permitted real host query, or absence; it no longer
+invents a Play Store package/version/signing identity or sets permission-granted bits in that lookup.
+The normal container account-manager implementation remains. Prepared-source and APK checks cover
+the excluded adapters. This does not establish working Google services, login or subscription playback.
+
+## Container control lifetime
+
+A subsequent local split-update test failed when Android froze the cached container control process:
+the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
+The host now holds an ordinary, non-exported service binding into the control process. This declares
+the process dependency to Android without a foreground daemon, root, a wake lock or a freezer override.
+The fixture verifies that the bound control service remains below cached importance after the hosted
+app stops, then performs the real split update. The combined account-adapter and lifetime changes
+passed 12 local API 36 tests in 52.806 seconds, debug build/lint, 98 JVM tests, prepared-source checks
+and the APK boundary check. This is fixture/control evidence, not commercial-service certification.
+
 ## Optional local compatibility smoke
 
 The instrumentation APK accepts `externalApk` (a filename in the debug host's private cache) and

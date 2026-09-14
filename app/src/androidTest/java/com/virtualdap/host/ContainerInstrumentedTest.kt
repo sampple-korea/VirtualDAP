@@ -210,6 +210,17 @@ class ContainerInstrumentedTest {
             await("stop before split update") {
                 ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid == null
             }
+            val manager = context.getSystemService(android.app.ActivityManager::class.java)
+            await("container control process remains bound after hosted app stops") {
+                @Suppress("DEPRECATION")
+                val service = manager.getRunningServices(Int.MAX_VALUE).firstOrNull {
+                    it.service.className == "com.virtualdap.host.container.ContainerControlService"
+                }
+                service != null && service.pid > 0 && manager.runningAppProcesses.orEmpty().any {
+                    it.pid == service.pid &&
+                        it.importance < android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHED
+                }
+            }
             val splitSet = File(context.cacheDir, "instrumented-music-split-set.apks")
             try {
                 instrumentation.context.assets.open("music-fixture-bundletool.apks").use { input ->

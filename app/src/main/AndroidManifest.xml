@@ -52,6 +52,10 @@
             android:name=".container.ContainerEventProvider"
             android:authorities="${applicationId}.container.events"
             android:exported="false" />
+        <service
+            android:name=".container.ContainerControlService"
+            android:exported="false"
+            android:process="@string/black_box_service_name" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -130,6 +130,39 @@ def prepare(upstream, dobby, overrides, output):
     shutil.copytree(dobby, dobby_output, ignore=shutil.ignore_patterns(".git", "build"))
 
     package = output / "java/top/niunaijun/blackbox"
+    # Synthetic accounts/tokens and fabricated package metadata cannot provide real service
+    # compatibility. Keep the ordinary account-service implementation and real package records.
+    hooks = package / "fake/hook/HookManager.java"
+    content = hooks.read_text(encoding="utf-8")
+    for name in ("GmsProxy", "GoogleAccountManagerProxy", "AuthenticationProxy"):
+        content = replace_once(content, f"import top.niunaijun.blackbox.fake.service.{name};\n", "")
+        content = replace_once(content, f"            addInjector(new {name}());\n", "")
+        (package / f"fake/service/{name}.java").unlink()
+    hooks.write_text(content, encoding="utf-8")
+
+    package_proxy = package / "fake/service/IPackageManagerProxy.java"
+    content = package_proxy.read_text(encoding="utf-8")
+    start = content.index('    @ProxyMethod("getPackageInfo")')
+    end = content.index('    @ProxyMethod("getPackageUid")', start)
+    content = content[:start] + '''    @ProxyMethod("getPackageInfo")
+    public static class GetPackageInfo extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String packageName = (String) args[0];
+            int flags = MethodParameterUtils.toInt(args[1]);
+            PackageInfo installed = BlackBoxCore.getBPackageManager().getPackageInfo(
+                    packageName, flags, BlackBoxCore.getUserId());
+            if (installed != null) return installed;
+            if (AppSystemEnv.isOpenPackage(packageName)) {
+                MethodParameterUtils.replaceUserIdIfNeeded(args, args.length - 1);
+                return method.invoke(who, args);
+            }
+            return null;
+        }
+    }
+
+''' + content[end:]
+    package_proxy.write_text(content, encoding="utf-8")
     configuration = package / "app/configuration/ClientConfiguration.java"
     content = configuration.read_text(encoding="utf-8")
     content, count = re.subn(

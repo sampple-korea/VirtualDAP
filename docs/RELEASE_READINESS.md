@@ -4,6 +4,11 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+CI also builds and lints the unsigned release variant and checks its API 34 minimum,
+non-debuggable manifest and product-output boundary. This validates packaging only; the unsigned
+file is not published as an installable release. The same checks passed locally on September 14,
+2026 (release lint: zero errors, seven warnings) before the subsequent account-adapter changes.
+
 Before publishing a user-facing release:
 
 - Build, lint and regression tests must pass for the exact release commit, including ordinary-UID

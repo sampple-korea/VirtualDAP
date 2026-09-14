@@ -2,11 +2,15 @@ package com.virtualdap.host.container
 
 import android.app.Application
 import android.content.Context
+import android.content.ComponentName
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
+import android.os.IBinder
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.service.PipelineStore
 import java.io.File
@@ -55,6 +59,26 @@ object ContainerRuntime {
     val state = mutableState.asStateFlow()
     private var hostContext: Context? = null
     private var attached = false
+    private var controlBound = false
+    private val controlConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            initializeControl()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            fail("Music space connection lost; waiting for Android to reconnect")
+        }
+
+        override fun onBindingDied(name: ComponentName) {
+            releaseControlBinding()
+            bindControl()
+        }
+
+        override fun onNullBinding(name: ComponentName) {
+            releaseControlBinding()
+            fail("Music space control service rejected the connection")
+        }
+    }
     private val pendingLaunches = ConcurrentHashMap<String, String>()
 
     fun attach(context: Context) {
@@ -112,8 +136,14 @@ object ContainerRuntime {
             core.doCreate()
             return false
         }
+        bindControl()
+        return true
+    }
+
+    private fun initializeControl() {
         scope.launch {
             try {
+                val core = BlackBoxCore.get()
                 core.doCreate()
                 check(core.createUser(USER) != null) { "Container user service did not initialize" }
                 loadApplications()
@@ -121,11 +151,34 @@ object ContainerRuntime {
                 fail("Music space could not start: ${error.message ?: error.javaClass.simpleName}")
             }
         }
-        return true
+    }
+
+    // The ordinary binding lets Android account for the host's IPC dependency. It is not a
+    // foreground daemon, wake lock, or cached-app-freezer override. Process death releases it.
+    private fun bindControl() {
+        if (controlBound) return
+        val context = hostContext ?: return
+        mutableState.update { it.copy(phase = ContainerPhase.INITIALIZING,
+            detail = "Connecting to the music space", lastError = null) }
+        try {
+            controlBound = context.bindService(
+                Intent(context, ContainerControlService::class.java),
+                controlConnection, Context.BIND_AUTO_CREATE,
+            )
+            check(controlBound) { "Android did not bind the control service" }
+        } catch (error: Exception) {
+            fail("Music space connection failed: ${error.message}")
+        }
+    }
+
+    private fun releaseControlBinding() {
+        if (controlBound) hostContext?.unbindService(controlConnection)
+        controlBound = false
     }
 
     fun refresh() {
         if (!attached) return
+        if (!controlBound) { bindControl(); return }
         scope.launch {
             try { loadApplications() } catch (error: Exception) { fail("Could not read music apps: ${error.message}") }
         }

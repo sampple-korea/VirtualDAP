@@ -12,6 +12,22 @@ APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_no_fabricated_service_identity_or_authentication(self):
+        hooks = (JAVA / "fake/hook/HookManager.java").read_text()
+        for name in ("GmsProxy", "GoogleAccountManagerProxy", "AuthenticationProxy"):
+            self.assertNotIn(name, hooks)
+            self.assertFalse((JAVA / f"fake/service/{name}.java").exists())
+        self.assertIn("new IAccountManagerProxy()", hooks)
+        proxy = (JAVA / "fake/service/IPackageManagerProxy.java").read_text()
+        block = proxy.split('public static class GetPackageInfo extends MethodHook {', 1)[1]
+        block = block.split('@ProxyMethod("getPackageUid")', 1)[0]
+        self.assertIn("getPackageInfo(\n                    packageName, flags", block)
+        self.assertIn("if (installed != null) return installed", block)
+        self.assertIn("return method.invoke(who, args)", block)
+        self.assertIn("return null", block)
+        for forbidden in ("createFake", "attachSigningInfo", "REQUESTED_PERMISSION_GRANTED", "catch"):
+            self.assertNotIn(forbidden, block)
+
     def test_media_routes_use_only_real_caller_attribution(self):
         proxy = (JAVA / "fake/service/IMediaRouterServiceProxy.java").read_text()
         block = proxy.split('public static class GetSystemRoutes extends MethodHook {', 1)[1]

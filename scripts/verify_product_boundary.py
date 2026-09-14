@@ -18,6 +18,9 @@ with zipfile.ZipFile(apk) as archive:
         b"Lcom/virtualdap/host/bridge/SharedRingBufferReader;",
         b"Lcom/virtualdap/host/bridge/RingBufferLayout;",
         b"Lcom/virtualdap/runtime/IGuestRuntime",
+        b"Ltop/niunaijun/blackbox/fake/service/GmsProxy",
+        b"Ltop/niunaijun/blackbox/fake/service/GoogleAccountManagerProxy",
+        b"Ltop/niunaijun/blackbox/fake/service/AuthenticationProxy",
     )
     for name in names:
         if name.endswith(".dex"):
