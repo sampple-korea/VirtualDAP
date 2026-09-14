@@ -39,6 +39,7 @@ data class OutputRoute(
     val sampleRates: List<Int>,
     val encodings: List<Int>,
     val directUsbDeviceId: Int? = null,
+    val officialBitPerfectFormats: List<PcmFormat> = emptyList(),
 )
 
 data class DsdPlaybackSnapshot(

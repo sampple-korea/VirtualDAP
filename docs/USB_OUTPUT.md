@@ -1,14 +1,18 @@
-# Internal direct USB output
+# Retained direct USB compatibility implementation
 
-VirtualDAP contains its own USB output path. UAPP is a reference for behavior/architecture, not a
-player that must be installed, a runtime dependency or a source of redistributed proprietary code.
+**Inactive in the product.** Sources are retained under `compatibility/direct_usb/kotlin`; native
+sources remain under `app/src/main/cpp/usb`. JVM and simulated native tests cover them. The normal
+APK contains no direct-USB Kotlin classes or USB transport shared library. The following describes
+the retained implementation, not a currently available output option.
+
+
+VirtualDAP contains its own independently implemented USB output path.
 
 ## Selection and permissions
 
-Diagnostics lists USB Audio streaming output interfaces. The user grants access through
-`UsbManager.requestPermission`. Descriptor inspection does not claim an interface or change clocks.
-After permission, the output selector offers a separate **Direct USB** route. It is opt-in; the
-normal Android output/mixer route remains available.
+The retained controller supports explicit Android USB permission and descriptor inspection.
+A future compatibility mode must wire these controls deliberately; current Diagnostics and the
+output selector expose only official Android bit-perfect capability discovery.
 
 The native engine wraps a duplicate of the descriptor obtained from `UsbManager.openDevice`.
 It does not enumerate native USB device nodes, open arbitrary `/dev/bus/usb` paths, require root,
@@ -21,6 +25,9 @@ Cleanup returns it to alternate zero and releases the interface.
 - Source-pinned, separately linked libusb 1.0.30 at
   `87a55632db62c9bdc58cd31d3ccfa673f1bb017f`, built for all four Android ABIs.
 - UAC1 endpoint and UAC2 clock rate requests with readback through the existing clock-control layer.
+- Descriptor-derived UAC2 clock source/selector/multiplier topology, including recursive-graph
+  rejection, verified selector switching with rollback, exact rational multiplier mapping,
+  read-only clocks and bounded post-change clock-validity polling.
 - Full-/high-/SuperSpeed isochronous output with bounded queued/in-flight bytes.
 - Four asynchronous transfer slots, exact nominal fractional packet lengths, explicit 10.14/16.16
   feedback and validation of each completed packet's status and length.
@@ -54,15 +61,14 @@ volume, mixer or sample-rate-conversion entry point.
 
 ## Current boundaries
 
-Direct USB currently reserves one active music stream. Use the Android output route for overlapping
-tracks. Ambiguous multi-format and RAW alternatives are excluded from the PCM path. Channel fallback
+The retained direct sink reserves one active music stream. Neither the current official route nor
+the retained sink supports overlapping output tracks. Ambiguous multi-format and RAW alternatives are excluded from the PCM path. Channel fallback
 supports exact layouts, mono/stereo expansion, stereo/mono conversion and multichannel-to-stereo or
-mono downmix; it does not invent arbitrary surround channels. Clock selectors/multipliers,
-implicit-feedback endpoints and vendor-specific feedback/native-DSD quirks require further
-integration.
+mono downmix; it does not invent arbitrary surround channels. Implicit-feedback endpoints and
+vendor-specific feedback/native-DSD quirks require further integration.
 
-Native DSD/DoP framing, qualified mode selection and direct transport composition are invoked by
-the foreground DSF/DSDIFF player and JVM-tested. A generic RAW descriptor or high PCM rate is never
+Native DSD/DoP framing, qualified mode selection and direct transport composition remain
+JVM-tested but are disconnected from the foreground DSF/DSDIFF player. A generic RAW descriptor or high PCM rate is never
 treated as proof of DSD support. ITF mode-switch devices and other vendor sequences remain disabled
 until their control transactions are implemented.
 
@@ -75,15 +81,16 @@ ownership. These tests also passed AddressSanitizer and UndefinedBehaviorSanitiz
 
 JVM tests cover PCM subslot packing, 20/24/32-bit widening/narrowing, float handling, format-family
 planning, alternate-setting retry, bounded conversion, DSD word/DoP framing and the complete PCM and
-DSD sinks with partial writes, discontinuities, truncation and failing negotiation. Android
-instrumentation loads the actual native libraries, verifies best-sinc packet continuity and
-pass/stop-band behavior, rejects a non-USB descriptor without closing the caller's descriptor, and
-retains the existing container/PCM/overlap/split-install tests.
+DSD sinks with partial writes, discontinuities, truncation and failing negotiation. Current Android
+instrumentation loads only the product DSP libraries and verifies best-sinc packet continuity and
+pass/stop-band behavior. Direct USB JNI is no longer loaded by product instrumentation.
+The container/PCM/overlap/split-install tests use a separate paced capture receiver.
 
 No physical DAC, USB analyzer or analog output has been tested. This is code/protocol validation,
 not a claim of measured hardware playback.
 
-libusb's full LGPL license and source/build provenance are included in APK assets. The BSD-licensed
+libusb's full LGPL license and source/build provenance remain in the repository; the current APK
+does not package its binary or generated license asset. The BSD-licensed
 libsamplerate source is pinned at `0844c208f683527c08ea8a80acc13b398aa9c8bf`, and its license is
 included in the same assets. Upstream:
 [libusb Android integration](https://github.com/libusb/libusb/tree/v1.0.30/android),

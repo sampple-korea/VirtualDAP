@@ -46,7 +46,7 @@ data class ContainerSnapshot(
     val hostApplications: List<ContainerApp> = emptyList(),
 )
 
-/** Ordinary-UID application container. It does not start a separate Android OS or an AVF VM. */
+/** Ordinary-UID application container sharing the host Android framework. */
 object ContainerRuntime {
     private const val USER = 0
     private const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024

@@ -6,7 +6,7 @@
 .idea/
 local.properties
 **/build/
-guest_os/build-*/
+container_runtime/build/
 captures/
 .externalNativeBuild/
 .cxx/

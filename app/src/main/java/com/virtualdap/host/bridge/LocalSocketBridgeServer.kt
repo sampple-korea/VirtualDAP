@@ -27,7 +27,7 @@ interface BridgeEvents {
     }
 }
 
-/** Receives guest HAL PCM over the shared-kernel abstract Unix socket namespace. */
+/** Receives application-container PCM over a same-UID abstract Unix socket. */
 class LocalSocketBridgeServer(
     private val events: BridgeEvents? = null,
     private val socketName: String = SOCKET_NAME,

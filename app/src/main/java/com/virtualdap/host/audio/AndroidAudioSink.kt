@@ -8,7 +8,6 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioMixerAttributes
 import android.media.AudioTrack
-import android.os.Build
 import android.os.SystemClock
 import com.virtualdap.host.model.OutputRoute
 import java.io.Closeable
@@ -27,42 +26,50 @@ data class SinkConfiguration(
 
 class AudioSinkException(message: String) : IllegalStateException(message)
 
-/** Blocking AudioTrack sink; backpressure keeps guest buffering bounded and playback paced. */
+/**
+ * Android 14 official bit-perfect mixer sink.
+ *
+ * This class deliberately has no mixer, default-route, resampling, channel-remapping or encoding
+ * fallback. A stream is accepted only when the selected output advertises the exact PCM format
+ * with [AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT].
+ */
 class AndroidAudioSink(context: Context) : Closeable {
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private val lock = Any()
     private var track: AudioTrack? = null
     private var configuration: SinkConfiguration? = null
-    private var converter: StreamingPcmConverter? = null
     private var selectedRouteId: Int? = null
+    private var selectedDevice: AudioDeviceInfo? = null
+    private var selectedMixer: AudioMixerAttributes? = null
+    private var mixerAttributes: AudioAttributes? = null
     private var submittedFrames = 0L
     private var playbackHeadWraps = 0L
     private var lastPlaybackHead = 0L
-    private var mixerDevice: AudioDeviceInfo? = null
-    private var mixerAttributes: AudioAttributes? = null
     private var playing = true
-    private var leftGain = 1f
-    private var rightGain = 1f
     private var exclusiveAllowed = true
 
     fun setExclusiveAllowed(value: Boolean) = synchronized(lock) {
         exclusiveAllowed = value
-        if (!value) clearMixerPreference()
+        if (!value) releaseTrack()
     }
 
-    @Suppress("DEPRECATION")
     fun setVolume(left: Float, right: Float) = synchronized(lock) {
         require(left.isFinite() && right.isFinite() && left in 0f..1f && right in 0f..1f)
-        leftGain = left
-        rightGain = right
-        if (left != 1f || right != 1f) clearMixerPreference()
-        track?.setStereoVolume(left, right)
+        if (left != 1f || right != 1f) {
+            releaseTrack()
+            throw AudioSinkException(
+                "Official bit-perfect output requires 100% application volume on both channels; " +
+                    "adjust volume on the DAC instead",
+            )
+        }
+        track?.setVolume(1f)
     }
 
     /** Controlled producers send PCM only while playing, so no paused write can hold this lock. */
     fun setPlaying(value: Boolean) = synchronized(lock) {
         playing = value
         track?.let { if (value) it.play() else it.pause() }
+        Unit
     }
 
     fun flush() = synchronized(lock) {
@@ -70,16 +77,6 @@ class AndroidAudioSink(context: Context) : Closeable {
         val resume = playing
         active.pause()
         active.flush()
-        configuration?.let { config ->
-            converter?.close()
-            converter = null
-            try {
-                converter = createConverter(config.requested, config.configured)
-            } catch (failure: Throwable) {
-                releaseTrack()
-                throw failure
-            }
-        }
         submittedFrames = 0
         playbackHeadWraps = 0
         lastPlaybackHead = 0
@@ -96,200 +93,163 @@ class AndroidAudioSink(context: Context) : Closeable {
     fun routes(): List<OutputRoute> = audioManager
         .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         .filterNot { it.type == AudioDeviceInfo.TYPE_TELEPHONY }
-        .map { device ->
-            OutputRoute(
-                id = device.id,
-                name = device.productName?.toString()?.takeIf(String::isNotBlank)
-                    ?: typeLabel(device.type),
-                type = device.type,
-                isUsb = device.type in USB_DEVICE_TYPES,
-                sampleRates = device.sampleRates.toList().sorted(),
-                encodings = device.encodings.toList().sorted(),
-            )
-        }
-        .sortedWith(compareByDescending<OutputRoute> { it.isUsb }.thenBy { it.name.lowercase() })
+        .map { device -> device.toOutputRoute(bitPerfectMixers(device)) }
+        .sortedWith(
+            compareByDescending<OutputRoute> { it.officialBitPerfectFormats.isNotEmpty() }
+                .thenByDescending { it.isUsb }
+                .thenBy { it.name.lowercase() },
+        )
 
     fun configure(format: PcmFormat): SinkConfiguration = synchronized(lock) {
-        if (configuration?.requested == format && track?.state == AudioTrack.STATE_INITIALIZED) {
+        if (!exclusiveAllowed) {
+            throw AudioSinkException("Official bit-perfect output supports exactly one active PCM stream")
+        }
+        if (configuration?.requested == format && track?.state == AudioTrack.STATE_INITIALIZED &&
+            mixerPreferenceActive()
+        ) {
             return configuration!!
         }
-        finishTrack()
-        releaseTrack()
+        try { finishTrack() } finally { releaseTrack() }
+
+        val routeId = selectedRouteId
+            ?: throw AudioSinkException("Select an output with Android official bit-perfect support")
+        val device = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == routeId }
+            ?: throw AudioSinkException("The selected output is no longer connected")
+        val mixers = bitPerfectMixers(device)
+        val advertised = mixers.mapNotNull { it.format.toPcmFormatOrNull() }
+        val exact = OfficialBitPerfectPolicy.exactMatch(format, advertised)
+            ?: throw AudioSinkException(
+                "${device.displayName()} does not support ${format.shortLabel()} through Android's " +
+                    "official bit-perfect path. Advertised formats: ${OfficialBitPerfectPolicy.summary(advertised)}",
+            )
+        val mixer = mixers.firstOrNull { it.format.matches(exact) }
+            ?: throw AudioSinkException("The selected bit-perfect mixer format could not be resolved")
+        buildTrack(format, device, mixer)
+    }
+
+    private fun buildTrack(
+        format: PcmFormat,
+        device: AudioDeviceInfo,
+        mixer: AudioMixerAttributes,
+    ): SinkConfiguration {
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
-        val preferred = selectedRouteId?.let { id ->
-            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == id }
-        }
-        val route = preferred?.toOutputRoute()
-        val candidates = OutputFormatPlanner.candidates(
-            source = format,
-            routeSampleRates = route?.sampleRates.orEmpty(),
-            packedHighResolutionSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
-        )
-        val failures = mutableListOf<String>()
-        for (candidate in candidates) {
-            try {
-                return buildTrack(format, candidate, preferred, attributes)
-            } catch (error: Exception) {
-                failures += "${candidate.shortLabel()}: ${error.message ?: error.javaClass.simpleName}"
-            }
-        }
-        throw AudioSinkException(
-            "No compatible output for ${format.shortLabel()}; tried ${failures.size} formats. " +
-                failures.take(3).joinToString(" | "),
-        )
-    }
-
-    private fun buildTrack(
-        source: PcmFormat,
-        target: PcmFormat,
-        preferred: AudioDeviceInfo?,
-        attributes: AudioAttributes,
-    ): SinkConfiguration {
-        val androidFormat = AudioFormat.Builder()
-            .setSampleRate(target.sampleRate)
-            .setEncoding(target.encoding.toAndroidEncoding())
-            .setChannelMask(target.channelCount.toOutputChannelMask())
-            .build()
         val minimum = AudioTrack.getMinBufferSize(
-            target.sampleRate,
-            target.channelCount.toOutputChannelMask(),
-            target.encoding.toAndroidEncoding(),
+            format.sampleRate,
+            format.channelCount.toOutputChannelMask(),
+            format.encoding.toAndroidEncoding(),
         )
-        if (minimum <= 0) throw AudioSinkException("AudioTrack rejected ${target.shortLabel()} ($minimum)")
-        val bufferBytes = maxOf(minimum * 2, target.frameSizeBytes * (target.sampleRate / 25))
-        val bitPerfect = source == target && leftGain == 1f && rightGain == 1f &&
-            requestBitPerfectMixer(preferred, attributes, androidFormat)
-        val trackBuilder = AudioTrack.Builder()
-            .setAudioAttributes(attributes)
-            .setAudioFormat(androidFormat)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(bufferBytes)
-            .apply {
-                // The low-latency flag is useful for the ordinary 48 kHz/16-bit mixer path,
-                // but can make direct/high-resolution routes reject an otherwise exact format.
-                if (!bitPerfect && target.sampleRate <= 48_000 && target.channelCount <= 2 &&
-                    target.encoding == PcmEncoding.PCM_16
-                ) {
-                    setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setOffloadedPlayback(false)
-            }
+        if (minimum <= 0) throw AudioSinkException("AudioTrack rejected ${format.shortLabel()} ($minimum)")
+        val bufferBytes = maxOf(minimum * 2, format.frameSizeBytes * (format.sampleRate / 25))
+
+        if (!audioManager.setPreferredMixerAttributes(attributes, device, mixer)) {
+            throw AudioSinkException("Android rejected the official bit-perfect mixer request for ${device.displayName()}")
+        }
+        selectedDevice = device
+        selectedMixer = mixer
+        mixerAttributes = attributes
+
         val built = try {
-            trackBuilder.build()
+            AudioTrack.Builder()
+                .setAudioAttributes(attributes)
+                .setAudioFormat(mixer.format)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes(bufferBytes)
+                .setOffloadedPlayback(false)
+                .build()
         } catch (error: Exception) {
             clearMixerPreference()
             throw error
         }
-        var streamConverter: StreamingPcmConverter? = null
         try {
             if (built.state != AudioTrack.STATE_INITIALIZED) {
-                throw AudioSinkException("Could not initialize ${target.shortLabel()}")
+                throw AudioSinkException("Could not initialize ${format.shortLabel()}")
             }
-            if (preferred != null && !built.setPreferredDevice(preferred)) {
-                throw AudioSinkException("Output route ${preferred.productName} rejected the stream")
+            if (!built.setPreferredDevice(device)) {
+                throw AudioSinkException("Output route ${device.displayName()} rejected the stream")
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                built.setStartThresholdInFrames(maxOf(1, target.sampleRate / 100))
-            }
-            @Suppress("DEPRECATION")
-            built.setStereoVolume(leftGain, rightGain)
-            if (playing) built.play()
-            val direct = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
-                    AudioManager.getDirectPlaybackSupport(androidFormat, attributes) !=
-                        AudioManager.DIRECT_PLAYBACK_NOT_SUPPORTED
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
-                    @Suppress("DEPRECATION") AudioTrack.isDirectPlaybackSupported(androidFormat, attributes)
-                else -> false
-            }
-            streamConverter = createConverter(source, target)
+            built.setStartThresholdInFrames(1)
+            built.setVolume(1f)
             track = built
-            converter = streamConverter
             submittedFrames = 0
             playbackHeadWraps = 0
             lastPlaybackHead = 0
-            val activeRoute = built.routedDevice?.toOutputRoute()
-            return SinkConfiguration(
-                requested = source,
-                configured = target,
-                route = activeRoute,
-                directPlayback = direct,
-                bufferFrames = bufferBytes / target.frameSizeBytes,
-                sourcePreserved = source == target,
-                bitPerfectRequested = bitPerfect,
-            ).also { configuration = it }
+            val result = SinkConfiguration(
+                requested = format,
+                configured = format,
+                route = device.toOutputRoute(bitPerfectMixers(device)),
+                directPlayback = true,
+                bufferFrames = bufferBytes / format.frameSizeBytes,
+                sourcePreserved = true,
+                bitPerfectRequested = true,
+            )
+            configuration = result
+            if (!mixerPreferenceActive()) {
+                throw AudioSinkException("Android did not retain the requested bit-perfect mixer configuration")
+            }
+            if (playing) built.play()
+            return result
         } catch (error: Throwable) {
-            streamConverter?.close()
             if (track === built) track = null
-            if (converter === streamConverter) converter = null
+            configuration = null
             built.release()
             clearMixerPreference()
             throw error
         }
     }
 
-    private fun requestBitPerfectMixer(
-        device: AudioDeviceInfo?,
-        attributes: AudioAttributes,
-        format: AudioFormat,
-    ): Boolean {
-        if (!exclusiveAllowed || Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
-            device == null || device.type !in USB_DEVICE_TYPES
-        ) return false
-        val supported = audioManager.getSupportedMixerAttributes(device).firstOrNull {
-            it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
-                it.format.sampleRate == format.sampleRate &&
-                it.format.encoding == format.encoding &&
-                it.format.channelMask == format.channelMask
-        } ?: return false
-        if (!audioManager.setPreferredMixerAttributes(attributes, device, supported)) return false
-        mixerDevice = device
-        mixerAttributes = attributes
-        return true
+    /** True only after both the official mixer preference and the actual routed device agree. */
+    fun bitPerfectActive(): Boolean = synchronized(lock) {
+        mixerPreferenceActive() && track?.routedDevice?.id == selectedDevice?.id
     }
 
-    /** Checks both the currently routed device and the OS's current mixer preference. */
-    fun bitPerfectActive(): Boolean = synchronized(lock) {
-        if (!exclusiveAllowed || leftGain != 1f || rightGain != 1f) return@synchronized false
-        val device = mixerDevice ?: return@synchronized false
-        val attributes = mixerAttributes ?: return@synchronized false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
-            track?.routedDevice?.id != device.id
-        ) return@synchronized false
-        val current = audioManager.getPreferredMixerAttributes(attributes, device)
-        current?.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
-            current.format == track?.format
+    private fun mixerPreferenceActive(): Boolean {
+        if (!exclusiveAllowed) return false
+        val device = selectedDevice ?: return false
+        val attributes = mixerAttributes ?: return false
+        val expected = selectedMixer ?: return false
+        val expectedFormat = expected.format.toPcmFormatOrNull() ?: return false
+        val current = runCatching { audioManager.getPreferredMixerAttributes(attributes, device) }.getOrNull()
+            ?: return false
+        return current.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
+            current.format == expected.format && track?.format?.matches(expectedFormat) == true
     }
 
     private fun clearMixerPreference() {
-        val device = mixerDevice
+        val device = selectedDevice
         val attributes = mixerAttributes
-        mixerDevice = null
+        selectedDevice = null
+        selectedMixer = null
         mixerAttributes = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-            device != null && attributes != null
-        ) runCatching { audioManager.clearPreferredMixerAttributes(attributes, device) }
+        if (device != null && attributes != null) {
+            runCatching { audioManager.clearPreferredMixerAttributes(attributes, device) }
+        }
     }
 
     fun write(pcm: ByteArray): Int = synchronized(lock) {
-        converter?.let { active ->
-            active.convertInto(pcm, ::writeOutput)
-            return@synchronized pcm.size
+        require(pcm.size <= 1024 * 1024) { "PCM packet exceeds the size limit" }
+        val format = configuration?.configured ?: throw AudioSinkException("Audio sink is not configured")
+        require(pcm.size % format.frameSizeBytes == 0) { "PCM packet contains a partial frame" }
+        try {
+            if (pcm.isNotEmpty()) writeOutput(pcm)
+        } catch (failure: Throwable) {
+            releaseTrack()
+            throw failure
         }
-        if (pcm.isNotEmpty()) writeOutput(pcm)
         pcm.size
     }
 
     private fun writeOutput(output: ByteArray) {
         var active = track ?: throw AudioSinkException("Audio sink is not configured")
-        // AudioTrack's byte[] overload explicitly rejects PCM float. ByteBuffer is the raw-byte
-        // API for every advertised encoding, including packed 24-bit, 32-bit and float PCM.
         val buffer = ByteBuffer.wrap(output).order(ByteOrder.LITTLE_ENDIAN)
         var restarts = 0
         while (buffer.hasRemaining()) {
+            if (!mixerPreferenceActive()) {
+                throw AudioSinkException("Android revoked the official bit-perfect mixer configuration")
+            }
+            awaitExactRoute(active)
             val count = active.write(buffer, buffer.remaining(), AudioTrack.WRITE_BLOCKING)
             if (count == AudioTrack.ERROR_DEAD_OBJECT) {
                 if (++restarts > 1) throw AudioSinkException("AudioTrack repeatedly died during one packet")
@@ -297,7 +257,7 @@ class AndroidAudioSink(context: Context) : Closeable {
                 releaseTrack()
                 val restarted = configure(deadConfiguration.requested)
                 if (restarted.configured != deadConfiguration.configured) {
-                    throw AudioSinkException("AudioTrack restart changed the negotiated output format")
+                    throw AudioSinkException("AudioTrack restart changed the official output format")
                 }
                 active = track ?: throw AudioSinkException("AudioTrack restart failed")
                 continue
@@ -306,7 +266,24 @@ class AndroidAudioSink(context: Context) : Closeable {
             if (count == 0) throw AudioSinkException("AudioTrack accepted no PCM data")
             submittedFrames += count / (configuration?.configured?.frameSizeBytes
                 ?: throw AudioSinkException("Audio sink configuration disappeared"))
+            awaitExactRoute(active)
         }
+    }
+
+    private fun awaitExactRoute(active: AudioTrack) {
+        val expected = selectedDevice ?: throw AudioSinkException("Selected output disappeared")
+        val deadline = SystemClock.elapsedRealtime() + ROUTE_CONFIRMATION_TIMEOUT_MS
+        do {
+            val routed = active.routedDevice
+            if (routed?.id == expected.id) return
+            if (routed != null) {
+                throw AudioSinkException(
+                    "Android routed audio to ${routed.displayName()} instead of ${expected.displayName()}; playback stopped",
+                )
+            }
+            Thread.sleep(2)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        throw AudioSinkException("Android did not confirm routing to ${expected.displayName()}; playback stopped")
     }
 
     fun queuedDurationMs(): Double? = synchronized(lock) {
@@ -321,9 +298,10 @@ class AndroidAudioSink(context: Context) : Closeable {
         (submittedFrames - playedFrames).coerceAtLeast(0L) * 1_000.0 / format.sampleRate
     }
 
-    fun routedOutput(): OutputRoute? = synchronized(lock) { track?.routedDevice?.toOutputRoute() }
+    fun routedOutput(): OutputRoute? = synchronized(lock) {
+        track?.routedDevice?.let { it.toOutputRoute(bitPerfectMixers(it)) }
+    }
 
-    /** Graceful end: submit the converter tail and let queued frames play before releasing. */
     fun finish() = synchronized(lock) {
         try {
             finishTrack()
@@ -336,16 +314,14 @@ class AndroidAudioSink(context: Context) : Closeable {
 
     private fun finishTrack() {
         if (track == null) return
-        // A graceful stop drains previously submitted frames even after pause.
         track?.play()
-        converter?.finish()?.takeIf { it.isNotEmpty() }?.let(::writeOutput)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // A short clip can end before the initial fill threshold. Permit its remaining
-            // frames to start instead of waiting forever for a buffer that will never fill.
-            track?.setStartThresholdInFrames(1)
-        }
+        track?.setStartThresholdInFrames(1)
         val deadline = SystemClock.elapsedRealtime() + 3_000
         while ((queuedDurationMs() ?: 0.0) > 0.0) {
+            if (!mixerPreferenceActive()) {
+                throw AudioSinkException("Android revoked bit-perfect output while draining")
+            }
+            awaitExactRoute(requireNotNull(track))
             if (Thread.currentThread().isInterrupted) throw AudioSinkException("Audio drain interrupted")
             if (SystemClock.elapsedRealtime() >= deadline) {
                 throw AudioSinkException("Audio output stopped advancing while draining")
@@ -357,40 +333,36 @@ class AndroidAudioSink(context: Context) : Closeable {
     private fun releaseTrack() {
         track?.let { active ->
             try { active.pause() } catch (_: IllegalStateException) { }
-            active.flush()
+            runCatching { active.flush() }
             active.release()
         }
         track = null
         clearMixerPreference()
         configuration = null
-        converter?.close()
-        converter = null
         submittedFrames = 0
         playbackHeadWraps = 0
         lastPlaybackHead = 0
     }
 
-    private fun createConverter(source: PcmFormat, target: PcmFormat): StreamingPcmConverter? {
-        if (source == target) return null
-        val resampler = if (source.sampleRate != target.sampleRate) {
-            HighQualityPcmResampler(source.sampleRate, target.sampleRate, target.channelCount)
-        } else null
-        return try {
-            StreamingPcmConverter(source, target, resampler)
-        } catch (failure: Throwable) {
-            resampler?.close()
-            throw failure
+    private fun bitPerfectMixers(device: AudioDeviceInfo): List<AudioMixerAttributes> = runCatching {
+        audioManager.getSupportedMixerAttributes(device).filter {
+            it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
+                it.format.toPcmFormatOrNull() != null
         }
-    }
+    }.getOrDefault(emptyList())
 
-    private fun AudioDeviceInfo.toOutputRoute() = OutputRoute(
+    private fun AudioDeviceInfo.toOutputRoute(mixers: List<AudioMixerAttributes>) = OutputRoute(
         id = id,
-        name = productName?.toString()?.takeIf(String::isNotBlank) ?: typeLabel(type),
+        name = displayName(),
         type = type,
         isUsb = type in USB_DEVICE_TYPES,
         sampleRates = sampleRates.toList().sorted(),
         encodings = encodings.toList().sorted(),
+        officialBitPerfectFormats = mixers.mapNotNull { it.format.toPcmFormatOrNull() }.distinct(),
     )
+
+    private fun AudioDeviceInfo.displayName(): String =
+        productName?.toString()?.takeIf(String::isNotBlank) ?: typeLabel(type)
 
     private fun typeLabel(type: Int): String = when (type) {
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Built-in speaker"
@@ -405,13 +377,32 @@ class AndroidAudioSink(context: Context) : Closeable {
         else -> "Audio device"
     }
 
-    @SuppressLint("InlinedApi") // Guarded in configure(); constants are inlined and safe to inspect.
+    @SuppressLint("InlinedApi")
     private fun PcmEncoding.toAndroidEncoding(): Int = when (this) {
         PcmEncoding.PCM_16 -> AudioFormat.ENCODING_PCM_16BIT
         PcmEncoding.PCM_24_PACKED -> AudioFormat.ENCODING_PCM_24BIT_PACKED
         PcmEncoding.PCM_32 -> AudioFormat.ENCODING_PCM_32BIT
         PcmEncoding.PCM_FLOAT -> AudioFormat.ENCODING_PCM_FLOAT
     }
+
+    private fun AudioFormat.toPcmFormatOrNull(): PcmFormat? {
+        val pcm = when (encoding) {
+            AudioFormat.ENCODING_PCM_16BIT -> PcmEncoding.PCM_16
+            AudioFormat.ENCODING_PCM_24BIT_PACKED -> PcmEncoding.PCM_24_PACKED
+            AudioFormat.ENCODING_PCM_32BIT -> PcmEncoding.PCM_32
+            AudioFormat.ENCODING_PCM_FLOAT -> PcmEncoding.PCM_FLOAT
+            else -> return null
+        }
+        return runCatching {
+            // The capture protocol declares a canonical channel layout, not an arbitrary index mask.
+            require(channelIndexMask == 0 && channelMask == channelCount.toOutputChannelMask())
+            PcmFormat(sampleRate, channelCount, pcm)
+        }.getOrNull()
+    }
+
+    private fun AudioFormat.matches(format: PcmFormat): Boolean =
+        sampleRate == format.sampleRate && channelCount == format.channelCount &&
+            encoding == format.encoding.toAndroidEncoding()
 
     private fun Int.toOutputChannelMask(): Int = when (this) {
         1 -> AudioFormat.CHANNEL_OUT_MONO
@@ -422,6 +413,7 @@ class AndroidAudioSink(context: Context) : Closeable {
     }
 
     companion object {
+        private const val ROUTE_CONFIRMATION_TIMEOUT_MS = 500L
         private val USB_DEVICE_TYPES = setOf(
             AudioDeviceInfo.TYPE_USB_DEVICE,
             AudioDeviceInfo.TYPE_USB_HEADSET,

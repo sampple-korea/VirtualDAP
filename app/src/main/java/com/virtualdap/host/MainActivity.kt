@@ -1,6 +1,5 @@
 package com.virtualdap.host
 
-import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -9,10 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,7 +17,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -90,7 +84,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,11 +91,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.virtualdap.host.guest.GuestAttestation
-import com.virtualdap.host.guest.GuestRuntimeController
-import com.virtualdap.host.guest.GuestRuntimePhase
-import com.virtualdap.host.guest.GuestRuntimeSnapshot
-import com.virtualdap.host.guest.GuestServices
 import com.virtualdap.host.container.ContainerPhase
 import com.virtualdap.host.container.ContainerRuntime
 import com.virtualdap.host.container.ContainerSnapshot
@@ -126,6 +114,26 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
+    private val outputDevices = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) = refreshOutputs()
+        override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>) = refreshOutputs()
+    }
+    private fun refreshOutputs() {
+        com.virtualdap.host.audio.AndroidAudioSink(this).use { discovery ->
+            val available = discovery.routes()
+            PipelineStore.update { it.copy(availableRoutes = available) }
+        }
+    }
+    override fun onStart() {
+        super.onStart()
+        getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(outputDevices, null)
+        refreshOutputs()
+    }
+    override fun onStop() {
+        getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(outputDevices)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -411,208 +419,6 @@ private fun MusicSpaceScreen(
 }
 
 @Composable
-private fun GuestScreen(
-    snapshot: GuestRuntimeSnapshot,
-    onImport: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-) {
-    val manifest = snapshot.manifest
-    val busy = snapshot.phase in setOf(
-        GuestRuntimePhase.IMPORTING,
-        GuestRuntimePhase.STARTING,
-        GuestRuntimePhase.STOPPING,
-    )
-    val running = snapshot.phase == GuestRuntimePhase.RUNNING || snapshot.phase == GuestRuntimePhase.STARTING
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            ScreenHeader(
-                eyebrow = "Android 13",
-                title = "Your music guest.",
-                subtitle = "Import a verified VirtualDAP image and run it through a trusted platform backend.",
-            )
-        }
-        item {
-            SectionCard(title = "Guest runtime", icon = Icons.Rounded.PhoneAndroid) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (busy) {
-                        CircularProgressIndicator(Modifier.size(22.dp), color = Amber, strokeWidth = 2.dp)
-                    } else {
-                        Box(
-                            Modifier.size(10.dp).background(
-                                if (snapshot.phase == GuestRuntimePhase.RUNNING) Mint else Muted,
-                                CircleShape,
-                            ),
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(guestPhaseLabel(snapshot.phase), fontWeight = FontWeight.SemiBold)
-                        Text(snapshot.detail ?: "No runtime activity", style = MaterialTheme.typography.bodySmall, color = Muted)
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                DiagnosticLine("Provider", snapshot.providerName ?: "Not installed")
-                DiagnosticLine("Trust", if (snapshot.providerAvailable) "Platform-signed" else "Unavailable")
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = onImport, enabled = !busy && !running, modifier = Modifier.weight(1f)) {
-                        Text(if (manifest == null) "Import bundle" else "Replace image")
-                    }
-                    Button(
-                        onClick = if (running) onStop else onStart,
-                        enabled = if (running) !busy else manifest != null && snapshot.providerAvailable && !busy,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(
-                            if (running) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        Text(if (running) "Stop guest" else "Start guest")
-                    }
-                }
-            }
-        }
-        if (manifest != null) {
-            item {
-                SectionCard(title = "Installed image", icon = Icons.Rounded.Memory) {
-                    Text(manifest.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    DiagnosticLine("Android", "13 · API ${manifest.androidApi}")
-                    DiagnosticLine("Architecture", manifest.architecture)
-                    DiagnosticLine("Image", humanBytes(manifest.imageBytes))
-                    DiagnosticLine(
-                        "Services",
-                        when (manifest.services) {
-                            GuestServices.AOSP -> "AOSP"
-                            GuestServices.USER_PROVIDED_GMS -> "User-provided GMS"
-                        },
-                    )
-                    DiagnosticLine(
-                        "Attestation",
-                        when (manifest.attestation) {
-                            GuestAttestation.NOT_CERTIFIED -> "Not certified"
-                            GuestAttestation.OEM_CERTIFIED -> "OEM-declared"
-                        },
-                    )
-                    DiagnosticLine("Content check", "SHA-256 verified at import")
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        manifest.buildFingerprint,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Muted,
-                    )
-                }
-            }
-        }
-        if (snapshot.phase == GuestRuntimePhase.RUNNING) {
-            item { GuestDisplay() }
-        }
-        item {
-            SectionCard(title = "Service integrity", icon = Icons.Rounded.Info) {
-                Text(
-                    "Image hashing detects corruption but does not create Play certification. Google services, Widevine, and hardware attestation must come from a lawfully provisioned OEM image. Identity or key-attestation spoofing is not installed by VirtualDAP.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Muted,
-                )
-            }
-        }
-        snapshot.lastError?.let { error -> item { ErrorCard(error) } }
-    }
-}
-
-@Composable
-@SuppressLint("ClickableViewAccessibility") // The surface forwards raw multi-pointer gestures to the guest.
-private fun GuestDisplay() {
-    SectionCard(title = "Guest display", icon = Icons.Rounded.PhoneAndroid) {
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().aspectRatio(9f / 16f)
-                .background(Color.Black, RoundedCornerShape(12.dp)),
-            factory = { viewContext ->
-                SurfaceView(viewContext).apply {
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    setOnTouchListener { view, event ->
-                        view.parent?.requestDisallowInterceptTouchEvent(
-                            event.actionMasked != MotionEvent.ACTION_UP &&
-                                event.actionMasked != MotionEvent.ACTION_CANCEL,
-                        )
-                        GuestRuntimeController.injectMotionEvent(event)
-                        true
-                    }
-                    setOnKeyListener { _, keyCode, event ->
-                        if (keyCode in setOf(
-                                KeyEvent.KEYCODE_VOLUME_UP,
-                                KeyEvent.KEYCODE_VOLUME_DOWN,
-                                KeyEvent.KEYCODE_VOLUME_MUTE,
-                            )
-                        ) {
-                            false
-                        } else {
-                            GuestRuntimeController.injectKeyEvent(event)
-                            true
-                        }
-                    }
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            requestFocus()
-                        }
-
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                            GuestRuntimeController.attachDisplay(
-                                holder.surface,
-                                width,
-                                height,
-                                resources.displayMetrics.densityDpi,
-                            )
-                        }
-
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            GuestRuntimeController.detachDisplay()
-                        }
-                    })
-                }
-            },
-            update = { view ->
-                if (view.holder.surface.isValid && view.width > 0 && view.height > 0) {
-                    GuestRuntimeController.attachDisplay(
-                        view.holder.surface,
-                        view.width,
-                        view.height,
-                        view.resources.displayMetrics.densityDpi,
-                    )
-                }
-            },
-            onRelease = { GuestRuntimeController.detachDisplay() },
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = { GuestRuntimeController.tapKey(KeyEvent.KEYCODE_BACK) },
-                modifier = Modifier.weight(1f),
-            ) { Text("Back") }
-            OutlinedButton(
-                onClick = { GuestRuntimeController.tapKey(KeyEvent.KEYCODE_HOME) },
-                modifier = Modifier.weight(1f),
-            ) { Text("Home") }
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Touch and hardware-key events are forwarded to the isolated guest. Audio remains on the dedicated PCM bridge.",
-            style = MaterialTheme.typography.bodySmall,
-            color = Muted,
-        )
-    }
-}
-
-@Composable
 private fun ScreenHeader(eyebrow: String, title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -657,7 +463,7 @@ private fun PlayerScreen(
         item {
             ScreenHeader(
                 eyebrow = "VirtualDAP",
-                title = "Guest audio, intact.",
+                title = "Music audio, intact.",
                 subtitle = "A monitored PCM path from isolated music apps to the output you choose.",
             )
         }
@@ -705,7 +511,7 @@ private fun PipelineHero(snapshot: PipelineSnapshot, onStart: () -> Unit, onStop
                 Text(
                     when {
                         snapshot.phase == PipelinePhase.PLAYING -> snapshot.sourceFormat?.shortLabel() ?: "PCM stream"
-                        snapshot.enabled -> "Listening for the guest audio HAL"
+                        snapshot.enabled -> "Listening for music app audio"
                         else -> "Pipeline is off"
                     },
                     style = MaterialTheme.typography.titleLarge,
@@ -713,9 +519,9 @@ private fun PipelineHero(snapshot: PipelineSnapshot, onStart: () -> Unit, onStop
                 )
                 Text(
                     when {
-                        snapshot.guestConnected -> snapshot.guestPeer ?: "Guest connected"
+                        snapshot.guestConnected -> snapshot.guestPeer ?: "Music app connected"
                         snapshot.enabled -> "Socket @${com.virtualdap.host.bridge.LocalSocketBridgeServer.SOCKET_NAME}"
-                        else -> "Start when your guest environment is ready."
+                        else -> "Select a supported output, then start the music pipeline."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = Muted,
@@ -757,11 +563,11 @@ private fun DsdFilePlayer(
     var dopConfirmed by rememberSaveable { mutableStateOf(false) }
     val selectedMode = DsdOutputMode.valueOf(selectedModeName)
     val playback = snapshot.dsdPlayback
-    val directRouteSelected = snapshot.availableRoutes
+    val supportedRouteSelected = snapshot.availableRoutes
         .firstOrNull { it.id == snapshot.selectedRouteId }
-        ?.directUsbDeviceId != null
+        ?.officialBitPerfectFormats?.isNotEmpty() == true
     val controlsLocked = playback.active
-    val routeReady = selectedMode == DsdOutputMode.PCM_CONVERSION || directRouteSelected
+    val routeReady = supportedRouteSelected && selectedMode != DsdOutputMode.NATIVE_DSD
     val dopReady = selectedMode != DsdOutputMode.DOP || dopConfirmed
     val canPlay = hasSelectedFile && !controlsLocked && !snapshot.guestConnected && routeReady && dopReady
 
@@ -807,21 +613,14 @@ private fun DsdFilePlayer(
             selected = selectedMode == DsdOutputMode.PCM_CONVERSION,
             enabled = !controlsLocked,
             title = "DSD → PCM",
-            detail = "96-tap DSD filter, then best-sinc rate matching when the selected output needs it",
+            detail = "Explicit DSD conversion at a fixed 8:1 rate; requires a matching bit-perfect PCM output",
             onClick = { selectedModeName = DsdOutputMode.PCM_CONVERSION.name },
-        )
-        DsdModeOption(
-            selected = selectedMode == DsdOutputMode.NATIVE_DSD,
-            enabled = !controlsLocked,
-            title = "Native DSD",
-            detail = "Direct USB only; requires an exact, reference-qualified DAC wire layout",
-            onClick = { selectedModeName = DsdOutputMode.NATIVE_DSD.name },
         )
         DsdModeOption(
             selected = selectedMode == DsdOutputMode.DOP,
             enabled = !controlsLocked,
             title = "DoP 1.1",
-            detail = "Direct USB 24-bit carrier with no volume, mixer or resampler",
+            detail = "Exact 24-bit carrier through Android official bit-perfect output",
             onClick = { selectedModeName = DsdOutputMode.DOP.name },
         )
 
@@ -842,7 +641,7 @@ private fun DsdFilePlayer(
         }
         if (!routeReady) {
             Text(
-                "Choose an Exclusive USB output below for native DSD or DoP.",
+                "Select a device with official bit-perfect support. Unsupported formats will stop playback.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Amber,
             )
@@ -905,12 +704,11 @@ private fun DsdFilePlayer(
             DiagnosticLine("Position", "${durationLabel(sampleDurationMillis(playback.samplePosition, playback.format.sampleRate))} / ${durationLabel(playback.durationMillis)}")
             DiagnosticLine("Mode", dsdModeLabel(playback.mode))
             playback.outputFormat?.let { DiagnosticLine("PCM output", it.shortLabel()) }
-            playback.transportRate?.let { DiagnosticLine("USB transport", "${it / 1_000.0} kHz") }
+            playback.transportRate?.let { DiagnosticLine("DoP carrier", "${it / 1_000.0} kHz") }
             playback.outputRoute?.let { DiagnosticLine("Routed output", it.name) }
             playback.qualification?.let { DiagnosticLine("Qualification", it) }
             if (playback.mode != DsdOutputMode.PCM_CONVERSION) {
-                DiagnosticLine("Source preserved", if (playback.sourcePreserved) "Verified in clean completed transfers" else "Not yet verified")
-                DiagnosticLine("USB underruns", playback.outputUnderruns.toString())
+                DiagnosticLine("Source preserved", if (playback.sourcePreserved) "Official bit-perfect route active" else "Not yet verified")
             }
         }
         playback.lastError?.let { error ->
@@ -965,7 +763,7 @@ private fun SignalChain(snapshot: PipelineSnapshot) {
             SignalNode(
                 Modifier.weight(1f),
                 label = "OUTPUT",
-                value = snapshot.activeRoute?.name ?: "System",
+                value = snapshot.activeRoute?.name ?: "Not selected",
                 active = snapshot.sinkFormat != null,
             )
         }
@@ -1019,18 +817,8 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             Text(
                 when {
                     snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
-                    snapshot.playingStreams > 1 -> "${snapshot.playingStreams} tracks are playing through the Android mixer. Bit-perfect output is disabled during overlap."
-                    snapshot.activeRoute?.directUsbDeviceId != null && (snapshot.applicationGainLeft != 1f || snapshot.applicationGainRight != 1f) ->
-                        "Application gain is applied before direct USB output; bit-perfect output is disabled."
-                    snapshot.activeRoute?.directUsbDeviceId != null && snapshot.outputUnderruns > 0 ->
-                        "Direct USB reported ${snapshot.outputUnderruns} queue underruns. Source bytes were not padded, but uninterrupted output is not verified."
-                    snapshot.activeRoute?.directUsbDeviceId != null && snapshot.bitPerfectActive ->
-                        "Direct USB: source precision preserved, clock negotiation accepted and complete USB transfers observed. DAC presentation timing is not measured."
-                    snapshot.bitPerfectActive -> "USB bit-perfect: unchanged PCM, with the OS bit-perfect mixer active on the routed DAC."
-                    !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}. Rate changes use the best-sinc filter."
-                    snapshot.activeRoute?.directUsbDeviceId != null -> "Direct USB transport. Waiting for clean completed transfers before confirming the output path."
-                    snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
-                    else -> "Source PCM reaches AudioTrack unchanged; the Android mixer may convert the hardware output."
+                    snapshot.bitPerfectActive -> "Unchanged PCM with Android's official bit-perfect mixer active on the selected output."
+                    else -> "Waiting for official bit-perfect route confirmation. Unsupported output stops playback."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
@@ -1041,7 +829,6 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
             DiagnosticLine("Application gain", "${(snapshot.applicationGainLeft * 100).toInt()}% / ${(snapshot.applicationGainRight * 100).toInt()}%")
             DiagnosticLine("Music tracks", "${snapshot.playingStreams} playing / ${snapshot.connectedStreams} connected")
-            snapshot.outputFramesCompleted?.let { DiagnosticLine("USB completed frames", it.toString()) }
         }
     }
 }
@@ -1076,7 +863,7 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
                     Column(Modifier.weight(1f)) {
                         Text(
                             snapshot.availableRoutes.firstOrNull { it.id == snapshot.selectedRouteId }?.name
-                                ?: "System default",
+                                ?: "No output selected",
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
@@ -1090,7 +877,7 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
             }
             ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 DropdownMenuItem(
-                    text = { Text("System default") },
+                    text = { Text("No output selected") },
                     onClick = { expanded = false; onSelectRoute(null) },
                 )
                 snapshot.availableRoutes.forEach { route ->
@@ -1099,13 +886,14 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
                             Column {
                                 Text(route.name)
                                 Text(
-                                    if (route.directUsbDeviceId != null) "Exclusive USB · one active stream; bypasses Android mixer"
-                                    else if (route.isUsb) "Android USB output · supports overlapping streams" else "Android audio output",
+                                    if (route.officialBitPerfectFormats.isNotEmpty()) "Official bit-perfect · ${route.officialBitPerfectFormats.size} formats"
+                                    else "Unsupported: device exposes no official bit-perfect format",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Muted,
                                 )
                             }
                         },
+                        enabled = route.officialBitPerfectFormats.isNotEmpty(),
                         onClick = { expanded = false; onSelectRoute(route) },
                     )
                 }
@@ -1198,7 +986,6 @@ private fun CompatibilityBadge(path: AppAudioPath) {
 
 @Composable
 private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit) {
-    val usb by com.virtualdap.host.audio.usb.UsbHostController.state.collectAsStateWithLifecycle()
     val locale = LocalLocale.current.platformLocale
     val timeFormatter = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
     LazyColumn(
@@ -1214,44 +1001,19 @@ private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit
             )
         }
         item {
-            SectionCard(title = "USB audio access", icon = Icons.Rounded.Usb) {
-                Text(
-                    "USB access is granted by Android. Inspecting a device does not claim its audio interface or start playback.",
-                    style = MaterialTheme.typography.bodySmall, color = Muted,
-                )
-                if (usb.devices.isEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text("No USB audio output is connected.", color = Muted)
-                }
-                usb.devices.forEach { device ->
-                    Spacer(Modifier.height(12.dp))
-                    Text(device.name, fontWeight = FontWeight.SemiBold)
+            SectionCard(title = "Official bit-perfect support", icon = Icons.Rounded.Usb) {
+                if (snapshot.availableRoutes.isEmpty()) Text("No audio outputs detected.", color = Muted)
+                snapshot.availableRoutes.forEach { route ->
+                    Text(route.name, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "USB %04x:%04x".format(device.vendorId, device.productId),
+                        if (route.officialBitPerfectFormats.isEmpty()) "Unsupported on this device"
+                        else route.officialBitPerfectFormats.joinToString("\n") { it.shortLabel() },
                         style = MaterialTheme.typography.bodySmall, color = Muted,
                     )
-                    OutlinedButton(
-                        onClick = {
-                            if (device.permission) com.virtualdap.host.audio.usb.UsbHostController.inspect(device.id)
-                            else com.virtualdap.host.audio.usb.UsbHostController.requestPermission(device.id)
-                        },
-                        enabled = !usb.busy,
-                    ) { Text(if (device.permission) "Inspect formats" else "Grant USB access") }
-                    if (device.profiles.isNotEmpty()) {
-                        Text(
-                            device.profiles.take(8).joinToString("\n") {
-                                "${it.channelCount} ch · ${it.bitResolution}-bit / ${it.subslotBytes}-byte slots · alt ${it.alternateSetting}" +
-                                    if (it.nativeDsd != null) " · native DSD layout (reference-qualified)"
-                                    else if (it.rawData) " · raw data (DSD not qualified)" else ""
-                            },
-                            style = MaterialTheme.typography.bodySmall, color = Muted,
-                        )
-                    }
+                    Spacer(Modifier.height(10.dp))
                 }
-                usb.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                androidx.compose.material3.TextButton(
-                    onClick = com.virtualdap.host.audio.usb.UsbHostController::refresh, enabled = !usb.busy,
-                ) { Text("Refresh USB devices") }
+                Text("Android 14 or later is required. Support also depends on the device, DAC and exact format.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
             }
         }
         item {
@@ -1272,7 +1034,7 @@ private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit
         item {
             SectionCard(title = "Session", icon = Icons.Rounded.Info) {
                 DiagnosticLine("Bridge", if (snapshot.enabled) "Listening" else "Stopped")
-                DiagnosticLine("Guest", if (snapshot.guestConnected) snapshot.guestPeer ?: "Connected" else "Not connected")
+                DiagnosticLine("Container", if (snapshot.guestConnected) snapshot.guestPeer ?: "Connected" else "Not connected")
                 DiagnosticLine("Reconnects", snapshot.reconnectCount.toString())
                 DiagnosticLine("Frames", snapshot.framesReceived.toString())
             }
@@ -1356,7 +1118,7 @@ private fun ErrorCard(message: String) {
 
 private fun phaseLabel(phase: PipelinePhase): String = when (phase) {
     PipelinePhase.STOPPED -> "Stopped"
-    PipelinePhase.WAITING_FOR_GUEST -> "Ready for guest"
+    PipelinePhase.WAITING_FOR_GUEST -> "Ready for music"
     PipelinePhase.BUFFERING -> "Buffering"
     PipelinePhase.PLAYING -> "Playing"
     PipelinePhase.PAUSED -> "Paused"
@@ -1393,16 +1155,6 @@ private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching 
         if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
     }
 }.getOrNull()
-
-private fun guestPhaseLabel(phase: GuestRuntimePhase): String = when (phase) {
-    GuestRuntimePhase.NOT_INSTALLED -> "No guest image"
-    GuestRuntimePhase.IMPORTING -> "Verifying and installing"
-    GuestRuntimePhase.READY -> "Ready"
-    GuestRuntimePhase.STARTING -> "Starting"
-    GuestRuntimePhase.RUNNING -> "Running"
-    GuestRuntimePhase.STOPPING -> "Stopping"
-    GuestRuntimePhase.ERROR -> "Needs attention"
-}
 
 private fun humanBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))

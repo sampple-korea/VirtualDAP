@@ -61,6 +61,7 @@ class ContainerInstrumentedTest {
             }
             return
         }
+        val capture = CaptureProbe().also { it.start() }
         val fixture = File(context.cacheDir, "instrumented-music-fixture.apk")
         try {
             instrumentation.context.assets.open("music-fixture.apk").use { input ->
@@ -70,7 +71,6 @@ class ContainerInstrumentedTest {
             await("fixture installation") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == FIXTURE })
-            AudioPipelineService.command(context, AudioPipelineService.ACTION_START)
             ContainerRuntime.launch(FIXTURE)
             await("fixture Application.onCreate") {
                 ContainerRuntime.state.value.applications.any {
@@ -82,7 +82,7 @@ class ContainerInstrumentedTest {
                 Triple("Play 96 kHz / float", 96_000, PcmEncoding.PCM_FLOAT),
             )) {
                 click(button)
-                await("captured $rate Hz PCM at the host output") {
+                await("captured $rate Hz PCM at the test receiver") {
                     val audio = PipelineStore.state.value
                     audio.guestConnected && audio.sourceFormat?.sampleRate == rate &&
                         audio.sourceFormat.encoding == encoding && audio.framesReceived >= rate
@@ -202,6 +202,7 @@ class ContainerInstrumentedTest {
                 corrupted.delete()
             }
         } finally {
+            capture.close()
             fixture.delete()
             ContainerRuntime.stop(FIXTURE)
             AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP)

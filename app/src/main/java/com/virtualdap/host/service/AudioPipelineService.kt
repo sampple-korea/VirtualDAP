@@ -22,8 +22,8 @@ import androidx.core.app.ServiceCompat
 import com.virtualdap.host.MainActivity
 import com.virtualdap.host.R
 import com.virtualdap.host.audio.AndroidAudioSink
-import com.virtualdap.host.audio.DirectDsdPacketOutput
 import com.virtualdap.host.audio.DsdContainerReader
+import com.virtualdap.host.audio.DsdDopPacketOutput
 import com.virtualdap.host.audio.DsdOutputMode
 import com.virtualdap.host.audio.DsdPacketOutput
 import com.virtualdap.host.audio.DsdPlaybackEvent
@@ -31,15 +31,12 @@ import com.virtualdap.host.audio.DsdPlaybackTask
 import com.virtualdap.host.audio.DsdPcmPacketOutput
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
-import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.bridge.BridgePeerPolicy
 import com.virtualdap.host.bridge.LocalSocketBridgeServer
-import com.virtualdap.host.guest.GuestRuntimeController
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.DsdPlaybackPhase
 import com.virtualdap.host.model.DsdPlaybackSnapshot
 import com.virtualdap.host.model.PipelinePhase
-import com.virtualdap.host.audio.usb.UsbHostController
 import kotlinx.coroutines.*
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
@@ -61,9 +58,6 @@ class AudioPipelineService : Service() {
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (!serviceStarted) return
-            val selected = PipelineStore.state.value.selectedRouteId
-            // Claiming a direct USB interface removes the Android mixer port intentionally.
-            if (UsbHostController.isDirectRoute(selected) && UsbHostController.isDirectDeviceConnected(selected)) return
             if (activeDsd != null) {
                 stopDsd("Audio output disconnected during DSD playback")
                 return
@@ -83,11 +77,12 @@ class AudioPipelineService : Service() {
         routes = AndroidAudioSink(this)
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
         registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED)
-        scope.launch { UsbHostController.state.collect { refreshRoutes() } }
         refreshRoutes()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Satisfy every startForegroundService request, including unsupported-output failures.
+        if (intent?.action in setOf(ACTION_START, ACTION_SELF_TEST, ACTION_PLAY_DSD)) ensureForeground("Preparing audio")
         when (intent?.action ?: ACTION_START) {
             ACTION_START -> startPipeline()
             ACTION_STOP -> {
@@ -101,6 +96,10 @@ class AudioPipelineService : Service() {
             ACTION_RESUME_DSD -> resumeDsd()
             ACTION_STOP_DSD -> stopDsd()
         }
+        if (serviceStarted && bridge == null && activeDsd == null && !selfTestRunning.get()) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            serviceStarted = false
+        }
         if (!serviceStarted) stopSelfResult(startId)
         return if (serviceStarted) START_STICKY else START_NOT_STICKY
     }
@@ -108,6 +107,20 @@ class AudioPipelineService : Service() {
     private fun startPipeline() {
         if (activeDsd?.thread?.isAlive == true) {
             PipelineStore.log("Stop local DSD playback before starting the music-app bridge", LogLevel.WARNING)
+            return
+        }
+        val selected = PipelineStore.state.value.let { state ->
+            state.availableRoutes.firstOrNull {
+                it.id == state.selectedRouteId && it.officialBitPerfectFormats.isNotEmpty()
+            }
+        }
+        if (selected == null) {
+            PipelineStore.update {
+                it.copy(phase = PipelinePhase.ERROR, lastError = "Select an output supported by Android's official bit-perfect path")
+            }
+            PipelineStore.log("Music bridge not started: no supported official bit-perfect output is selected", LogLevel.ERROR)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            serviceStarted = false
             return
         }
         ensureForeground("Waiting for music")
@@ -127,10 +140,10 @@ class AudioPipelineService : Service() {
             mixer = sessions
             bridge = LocalSocketBridgeServer(
                 eventsFactory = sessions::createSession,
-                peerPolicy = BridgePeerPolicy(android.os.Process.myUid(), GuestRuntimeController::trustedProviderUid),
+                peerPolicy = BridgePeerPolicy(android.os.Process.myUid()),
             ).also { it.start() }
             PipelineStore.update { it.copy(enabled = true, phase = PipelinePhase.WAITING_FOR_GUEST, lastError = null) }
-            PipelineStore.log("Audio bridge ready; independent bounded connections for each music track")
+            PipelineStore.log("Audio bridge ready; one active track may use the selected official bit-perfect output")
         } catch (error: Exception) {
             sessions.close()
             mixer = null
@@ -162,15 +175,28 @@ class AudioPipelineService : Service() {
             PipelineStore.log("Output changes are locked during local DSD playback", LogLevel.WARNING)
             return
         }
-        val selected = routeId.takeUnless { it == DEFAULT_ROUTE_ID }
+        val selected = routeId.takeUnless { it == DEFAULT_ROUTE_ID }?.let { requested ->
+            PipelineStore.state.value.availableRoutes.firstOrNull {
+                it.id == requested && it.officialBitPerfectFormats.isNotEmpty()
+            }?.id
+        }
         mixer?.selectRoute(selected)
-        PipelineStore.update { it.copy(selectedRouteId = selected) }
+        PipelineStore.update {
+            it.copy(
+                selectedRouteId = selected,
+                lastError = if (routeId != DEFAULT_ROUTE_ID && selected == null) {
+                    "That output does not expose Android's official bit-perfect capability"
+                } else null,
+            )
+        }
     }
 
     private fun refreshRoutes() {
-        val available = routes.routes() + UsbHostController.routes()
+        val available = routes.routes()
         val old = PipelineStore.state.value.selectedRouteId
-        val selected = old?.takeIf { id -> available.any { it.id == id } }
+        val selected = old?.takeIf { id ->
+            available.any { it.id == id && it.officialBitPerfectFormats.isNotEmpty() }
+        }
         PipelineStore.update { it.copy(availableRoutes = available, selectedRouteId = selected) }
         if (selected != old) {
             if (serviceStarted && old != null) {
@@ -194,12 +220,12 @@ class AudioPipelineService : Service() {
             return
         }
         if (!selfTestRunning.compareAndSet(false, true)) return
-        if (!serviceStarted) startPipeline()
+        if (bridge == null) startPipeline()
+        if (!serviceStarted) { selfTestRunning.set(false); return }
         updatePlaybackWakeLock(true)
         thread(name = "VirtualDAP-self-test") {
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
-            val testSink = RoutedAudioSink(this)
-            testSink.setExclusiveAllowed(UsbHostController.isDirectRoute(PipelineStore.state.value.selectedRouteId))
+            val testSink = AndroidAudioSink(this)
             try {
                 if (PipelineStore.state.value.guestConnected) return@thread
                 testSink.selectRoute(PipelineStore.state.value.selectedRouteId)
@@ -366,26 +392,25 @@ class AudioPipelineService : Service() {
                     throw CancellationException("DSD playback cancelled while opening the file")
                 }
                 val selectedRoute = PipelineStore.state.value.let { state ->
-                    state.availableRoutes.firstOrNull { it.id == state.selectedRouteId }
-                }
+                    state.availableRoutes.firstOrNull {
+                        it.id == state.selectedRouteId && it.officialBitPerfectFormats.isNotEmpty()
+                    }
+                } ?: error("Select an output supported by Android's official bit-perfect path")
                 val openedOutput = when (mode) {
                     DsdOutputMode.PCM_CONVERSION -> DsdPcmPacketOutput(
                         this,
-                        PipelineStore.state.value.selectedRouteId,
+                        selectedRoute,
                         openedReader.format,
                     )
-                    DsdOutputMode.NATIVE_DSD,
-                    DsdOutputMode.DOP -> {
-                        val route = selectedRoute?.takeIf { it.directUsbDeviceId != null }
-                            ?: error("Native DSD and DoP require a selected Exclusive USB output")
-                        DirectDsdPacketOutput(
-                            requireNotNull(route.directUsbDeviceId),
-                            route,
+                    DsdOutputMode.DOP -> DsdDopPacketOutput(
+                            this,
+                            selectedRoute,
                             openedReader.format,
-                            mode,
                             intent.getBooleanExtra(EXTRA_DOP_CONFIRMED, false),
                         )
-                    }
+                    DsdOutputMode.NATIVE_DSD -> error(
+                        "Native DSD is unavailable in official-output mode; choose DoP or explicit DSD-to-PCM",
+                    )
                 }
                 packetOutput = openedOutput
                 val outputSnapshot = dsdOutputSnapshot(openedOutput, selectedRoute)
@@ -435,21 +460,17 @@ class AudioPipelineService : Service() {
 
     private fun dsdOutputSnapshot(output: DsdPacketOutput?, fallbackRoute: com.virtualdap.host.model.OutputRoute?) =
         when (output) {
-            is DirectDsdPacketOutput -> DsdOutputSnapshot(
-                null,
+            is DsdDopPacketOutput -> DsdOutputSnapshot(
+                output.outputFormat,
                 output.routedOutput() ?: fallbackRoute,
-                output.configuration.transportRate,
-                output.configuration.qualification,
+                output.outputFormat.sampleRate,
+                "DoP 1.1 in an exact Android official bit-perfect PCM carrier",
             )
             is DsdPcmPacketOutput -> DsdOutputSnapshot(
                 output.configuration.configured,
                 output.routedOutput() ?: fallbackRoute,
                 null,
-                if (output.outputFormat.sampleRate == output.configuration.configured.sampleRate) {
-                    "DSD converted to PCM with a stateful 96-tap low-pass filter"
-                } else {
-                    "DSD converted with a 96-tap low-pass filter and packet-continuous best-sinc rate matching"
-                },
+                "DSD converted at a fixed 8:1 rate with a stateful 96-tap low-pass filter; no output resampling",
             )
             else -> DsdOutputSnapshot(null, fallbackRoute, null, null)
         }
@@ -457,12 +478,7 @@ class AudioPipelineService : Service() {
     private fun handleDsdEvent(active: ActiveDsd, output: DsdPacketOutput?, event: DsdPlaybackEvent) {
         if (activeDsd !== active) return
         val outputState = dsdOutputSnapshot(output, PipelineStore.state.value.dsdPlayback.outputRoute)
-        val stats = when (output) {
-            is DirectDsdPacketOutput -> output.statistics()
-            is DsdPcmPacketOutput -> output.statistics()
-            else -> null
-        }
-        val preserved = output is DirectDsdPacketOutput && output.sourcePreservedActive()
+        val preserved = output is DsdDopPacketOutput && output.sourcePreserved()
         when (event) {
             is DsdPlaybackEvent.Started -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
@@ -478,7 +494,6 @@ class AudioPipelineService : Service() {
                             samplePosition = event.samplePosition,
                             outputRoute = outputState.route,
                             sourcePreserved = preserved,
-                            outputUnderruns = stats?.underruns ?: 0,
                         ))
                     }
                 }
@@ -499,7 +514,6 @@ class AudioPipelineService : Service() {
                     samplePosition = it.dsdPlayback.sampleCountPerChannel,
                     outputRoute = outputState.route,
                     sourcePreserved = preserved,
-                    outputUnderruns = stats?.underruns ?: 0,
                 )) }
                 PipelineStore.log("DSD playback completed")
                 finishDsd(active)

@@ -10,7 +10,7 @@ hosted AudioTrack.write → bounded streaming queue / static buffer iterator →
 hosted AAudio callback  → preallocated callback buffer ────────────────────┤
 hosted AAudio write     → timeout-aware bounded streaming queue ───────────┤
 hosted OpenSL ES queue  → copied, count-bounded native buffer queue ───────┘
-                         → host AudioPipelineService → real host AudioTrack → output route
+                         → host AudioPipelineService → official bit-perfect AudioTrack → selected output
 ```
 
 An intercepted AudioTrack's original native output is not started or written, so playback is not
@@ -45,11 +45,11 @@ disable the separate AudioTrack capture path.
 - AAudio start/pause/flush/stop state checks, timeout-aware partial writes, frames-written/read
   counters and source-frame monotonic/boottime timestamps. State-changing or close calls colliding
   with an AAudio callback are rejected as Android does.
-- Application left/right volume is forwarded to the actual host track. Non-unity application gain
-  prevents the UI from labeling the output bit-perfect.
+- Application left/right volume is forwarded as a control message. Non-unity application gain
+  is rejected by the official output sink; it is not applied as software volume.
 - Playback-head and timestamp queries return host observations in source-frame units.
-- Source bytes are neither re-encoded nor mixed in the container bridge. Any required host-format
-  conversion is separately reported by the output pipeline.
+- Source bytes are neither re-encoded nor mixed in the container bridge. If the official output
+  cannot accept that exact PCM format, playback fails without host-format conversion.
 
 The streaming queue and static buffer are each bounded by the original AudioTrack capacity, capped
 at 8 MiB. The worker sends at most a 10 ms PCM packet at a time; a streaming in-flight packet counts
@@ -68,8 +68,8 @@ stop and destruction observable.
 
 ## Protocol 3
 
-The original 32-byte handshake layout is retained with version 3. Version 2 HAL clients still work
-unchanged. Version 3 starts the host sink paused. Every v3 message, including controls and pings,
+The original 32-byte handshake layout is retained with version 3. Legacy version 2 wire parsing is
+retained, but the old full-OS HAL implementation has been removed. Version 3 starts the host sink paused. Every v3 message, including controls and pings,
 receives a 32-byte acknowledgment:
 
 | Offset | Type | Meaning |
@@ -84,16 +84,15 @@ receives a 32-byte acknowledgment:
 Message type 5 has a four-byte command: 1 play, 2 pause, 3 flush, 4 drain/stop.
 Message type 6 has two little-endian float32 gains in [0, 1]; NaN/infinity are rejected.
 Pings refresh position after the last PCM submission. These are playback-head observations,
-**not measured USB DAC presentation timestamps**. A host compatibility resampler introduces
-source-frame rounding; production rate changes use a packet-continuous, source-pinned best-sinc
-filter. Hardware latency beyond Android's playback head is not claimed measured.
+**not measured USB DAC presentation timestamps**. The official PCM output does not resample.
+Hardware latency beyond Android's playback head is not claimed measured.
 
 ## Evidence and remaining work
 
-The independent fixture APK runs inside ordinary-UID API 33/36 x86_64 emulators and emits streaming
+The independent fixture APK is exercised by an ordinary-UID emulator test (CI targets API 34/36) and emits streaming
 48 kHz PCM16, streaming 96 kHz float, a finite-loop 44.1 kHz static PCM16 buffer, an 88.2 kHz PCM16
 AAudio callback stream, a 96 kHz float AAudio blocking-write stream and a 48 kHz PCM16 OpenSL ES
-Android-simple buffer queue. Instrumentation verifies reception at the host output, source formats,
+Android-simple buffer queue. Instrumentation verifies reception at a paced test receiver, source formats,
 static reload/position/loop entry points, AAudio callback collision and duplicate-start rules, timed
 native writes, OpenSL engine reference handling, queue capacity/Clear/state/callback contracts,
 play events and position, pause/flush/resume, timestamp and frame progress, mute/unity gain and no
@@ -102,25 +101,23 @@ streaming and static packet bytes, bounded prebuffering, finite/infinite loop ge
 reload, immediate static stop, timed full-buffer writes, pre-play control/gain isolation, streaming drain,
 volume controls, playback position and worker cleanup.
 
-The receiver now accepts up to 16 independent streams, each with its own output track, format,
-backpressure, controls and playback-head observations. Android mixes overlapping tracks, and the
-host revokes its USB bit-perfect preference while they overlap. The UI shows the most recently
-activated playing stream and the total connected/playing track counts. Idle handshakes time out;
-paused, authenticated tracks can remain connected without occupying another stream's worker.
+The receiver accepts up to 16 independent connections, each with its own format,
+backpressure and controls. The product grants one active output lease and creates only its owner's
+output track. A second track is rejected while the first owns
+the output; pause retains the lease and stop/release frees it. Application gain must stay at unity.
+Unsupported output never falls back to Android mixing.
 
-The fixture verifies two simultaneous 48/96 kHz streams and continued playback of the second after
-the first is released on API 33/36. This establishes concurrent delivery, not gapless or sample-aligned
-crossfade timing across independent hardware tracks. Bit-perfect mode is not automatically reasserted
-mid-track after overlap; a new exact-format track can request it again.
+Instrumentation uses a separate paced test-only receiver to verify capture, pause, gain messages,
+overlap and individual release without a DAC. These observations prove container transport only.
+Official output policy and unsupported route rejection are tested separately.
 
 This does not establish all music-service compatibility. Still required are AudioTrack/OpenSL ES
 playback-speed and effect semantics, app-specific decoder/DRM/login tests and wider Android API/ABI
 runtime coverage.
-An opt-in exclusive USB PCM transport is now integrated; see [USB output](USB_OUTPUT.md).
-Its single-stream and hardware-validation limits remain distinct from Android's mixed output path.
-Streaming apps remain PCM sources at this capture boundary. Local DSF/DSDIFF playback has a
-separate product-facing native DSD/DoP path with reference-qualified device layouts; it does not
-relabel a service's decoded PCM as DSD.
+Direct USB PCM/native DSD implementations are retained for future compatibility development;
+see [retained USB implementation](USB_OUTPUT.md). They are excluded from the current APK.
+Streaming apps remain PCM sources. Local-file DoP and explicit DSD-to-PCM conversion both use the
+official bit-perfect output path.
 
 API signatures are checked against
 [AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java),

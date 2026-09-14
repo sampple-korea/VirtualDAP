@@ -34,9 +34,13 @@ jobs:
         run: yes | sdkmanager "cmake;3.22.1" "ndk;28.2.13676358"
       - name: Verify host app
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Verify product output boundary
+        run: python3 scripts/verify_product_boundary.py app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify container PCM transport
+        run: bash scripts/verify_container_transport.sh
       - name: Verify consumer engine adaptations
         run: python3 scripts/verify_container_sources.py
-      - name: Verify native DSD and simulated USB transfers
+      - name: Verify DSP and retained compatibility transport
         run: bash scripts/verify_dsp.sh
       - name: Upload debug APK and reports
         uses: actions/upload-artifact@v4
@@ -50,37 +54,6 @@ jobs:
             app/build/reports/tests/
             app/build/reports/lint-results-debug.*
 
-  guest-bridge:
-    name: Android 13 guest bridge
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Android SDK and NDK
-        uses: android-actions/setup-android@v3
-      - name: Install native toolchain
-        run: yes | sdkmanager "cmake;3.22.1" "ndk;28.2.13676358"
-      - name: Verify transport, ABI builds, HAL and policy
-        run: scripts/verify_guest.sh
-      - name: Verify guest bundle packager
-        run: python3 -m py_compile scripts/package_guest_bundle.py
-      - name: Verify AVF runtime contract and vsock proxy
-        run: scripts/verify_platform_runtime.sh
-      - name: Package Android 13 guest integration kit
-        run: |
-          mkdir -p out
-          tar --exclude='guest_os/build-*' -czf out/virtualdap-android13-guest-kit.tar.gz \
-            guest_os platform_runtime docs/GUEST_ANDROID_13.md docs/GUEST_BUNDLE.md docs/PLATFORM_RUNTIME.md \
-            container_runtime/tests/CapturedPcmStreamTest.cpp \
-            container_runtime/core/src/main/cpp/CapturedPcmStream.cpp \
-            container_runtime/core/src/main/cpp/CapturedPcmStream.h
-      - name: Upload guest integration kit
-        uses: actions/upload-artifact@v4
-        with:
-          name: virtualdap-android13-guest-kit
-          if-no-files-found: error
-          path: out/virtualdap-android13-guest-kit.tar.gz
-
   consumer-runtime:
     name: Ordinary-UID runtime (API ${{ matrix.api }})
     needs: host-app
@@ -89,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [33, 36]
+        api: [34, 36]
     steps:
       - uses: actions/download-artifact@v4
         with:

@@ -1,6 +1,7 @@
 package com.virtualdap.host.audio
 
 import com.virtualdap.host.audio.usb.UsbAudioDescriptors
+import com.virtualdap.host.audio.usb.UsbAudioClockEntity
 import com.virtualdap.host.audio.usb.UsbIsoPacketClock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -39,6 +40,7 @@ class UsbAudioDescriptorsTest {
             9, 2, 0, 0, 2, 1, 0, 0x80, 50,
             9, 4, 0, 0, 0, 1, 1, 0x20, 0,
             17, 0x24, 2, 1, 1, 1, 0, 10, 2, 3, 0, 0, 0, 0, 0, 0, 0,
+            8, 0x24, 0x0a, 10, 3, 3, 1, 0,
             9, 4, 1, 1, 1, 1, 2, 0x20, 0,
             16, 0x24, 1, 1, 0, 1, 1, 0, 0, 0x80, 2, 3, 0, 0, 0, 0,
             6, 0x24, 2, 1, 4, 32,
@@ -50,11 +52,41 @@ class UsbAudioDescriptorsTest {
         assertTrue(profile.rates.isEmpty())
         assertTrue(profile.pcm)
         assertTrue(profile.rawData) // Candidate only; not a native-DSD guarantee.
+        assertEquals(UsbAudioClockEntity.Source(10, 3, 3), profile.clockTopology?.entities?.get(10))
+    }
+
+    @Test fun retainsSelectorAndMultiplierClockTopologyForRuntimeNegotiation() {
+        val descriptors = bytes(
+            9, 2, 0, 0, 2, 1, 0, 0x80, 50,
+            9, 4, 0, 0, 0, 1, 1, 0x20, 0,
+            17, 0x24, 2, 1, 1, 1, 0, 13, 2, 3, 0, 0, 0, 0, 0, 0, 0,
+            8, 0x24, 0x0a, 10, 3, 7, 1, 0,
+            8, 0x24, 0x0a, 11, 0, 5, 0, 0,
+            9, 0x24, 0x0b, 12, 2, 10, 11, 3, 0,
+            7, 0x24, 0x0c, 13, 12, 0, 0,
+            9, 4, 1, 1, 1, 1, 2, 0x20, 0,
+            16, 0x24, 1, 1, 0, 1, 1, 0, 0, 0, 2, 3, 0, 0, 0, 0,
+            6, 0x24, 2, 1, 4, 32,
+            7, 5, 2, 5, 0, 4, 1,
+        )
+        val topology = UsbAudioDescriptors.parse(descriptors).single().clockTopology!!
+        assertEquals(13, topology.rootEntity)
+        assertEquals(UsbAudioClockEntity.Source(10, 3, 7), topology.entities[10])
+        assertEquals(UsbAudioClockEntity.Source(11, 0, 5), topology.entities[11])
+        assertEquals(UsbAudioClockEntity.Selector(12, listOf(10, 11), 3), topology.entities[12])
+        assertEquals(UsbAudioClockEntity.Multiplier(13, 12, 0), topology.entities[13])
     }
 
     @Test fun malformedLengthAndClockRangesAreRejected() {
         assertThrows(IllegalArgumentException::class.java) { UsbAudioDescriptors.parse(bytes(0, 4)) }
         assertThrows(IllegalArgumentException::class.java) { UsbAudioDescriptors.parse(bytes(9, 4, 0)) }
+        assertThrows(IllegalArgumentException::class.java) {
+            UsbAudioDescriptors.parse(bytes(
+                9, 2, 0, 0, 1, 1, 0, 0x80, 50,
+                9, 4, 0, 0, 0, 1, 1, 0x20, 0,
+                7, 0x24, 0x0b, 12, 2, 10, 11,
+            ))
+        }
         assertThrows(IllegalArgumentException::class.java) { UsbAudioDescriptors.parseClockRanges(bytes(1, 0)) }
         val range = UsbAudioDescriptors.parseClockRanges(
             bytes(1, 0, 0x44, 0xac, 0, 0, 0x88, 0x58, 1, 0, 0x44, 0xac, 0, 0),

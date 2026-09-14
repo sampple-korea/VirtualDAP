@@ -25,7 +25,7 @@ extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
     compileSdk = 37
     ndkVersion = "28.2.13676358"
     defaultConfig {
-        minSdk = 33
+        minSdk = 34
         externalNativeBuild {
             cmake { targets += "blackbox" }
         }

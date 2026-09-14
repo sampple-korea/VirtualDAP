@@ -24,6 +24,8 @@ if(ANDROID)
     target_link_libraries(virtualdap_dsp PRIVATE dsd2pcm SampleRate::samplerate)
     target_compile_options(virtualdap_dsp PRIVATE -Wall -Wextra -Werror)
     target_link_options(virtualdap_dsp PRIVATE "-Wl,-z,max-page-size=16384")
+    # Dormant native compatibility implementation; not linked or packaged in the product.
+    if(VIRTUALDAP_BUILD_DIRECT_USB)
     add_library(usb-1.0 SHARED
         "${LIBUSB_ROOT}/libusb/core.c" "${LIBUSB_ROOT}/libusb/descriptor.c"
         "${LIBUSB_ROOT}/libusb/hotplug.c" "${LIBUSB_ROOT}/libusb/io.c"
@@ -39,6 +41,7 @@ if(ANDROID)
     target_link_libraries(virtualdap_usb PRIVATE usb-1.0)
     target_compile_options(virtualdap_usb PRIVATE -Wall -Wextra -Werror)
     target_link_options(virtualdap_usb PRIVATE "-Wl,-z,max-page-size=16384")
+    endif()
 else()
     enable_testing()
     add_executable(dsd_filter_test tests/DsdFilterTest.cpp)

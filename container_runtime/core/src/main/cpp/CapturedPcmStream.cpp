@@ -23,7 +23,7 @@ CapturedPcmStream::CapturedPcmStream(PcmConfig config, size_t capacity_frames, s
     : config_(config), capacity_bytes_(capacity_frames * config.frame_size),
       packet_bytes_(std::max(1u, config.sample_rate / 100) * config.frame_size),
       data_mode_(data_mode),
-      transport_(std::move(endpoint), "", kControlledProtocolVersion),
+      transport_(std::move(endpoint), kControlledProtocolVersion),
       static_buffer_(data_mode == CapturedDataMode::kStatic ? capacity_bytes_ : 0, 0) {}
 
 CapturedPcmStream::~CapturedPcmStream() {

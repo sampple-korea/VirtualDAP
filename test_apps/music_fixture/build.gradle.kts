@@ -7,7 +7,7 @@ android {
     dynamicFeatures += setOf(":musicFeature")
     defaultConfig {
         applicationId = "com.virtualdap.fixture.music"
-        minSdk = 33
+        minSdk = 34
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"

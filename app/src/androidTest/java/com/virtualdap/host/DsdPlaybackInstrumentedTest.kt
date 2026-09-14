@@ -32,7 +32,7 @@ class DsdPlaybackInstrumentedTest {
         created.clear()
     }
 
-    @Test fun foregroundServiceStreamsARealDsfThroughTheNativeDecoderAndAudioTrack() {
+    @Test fun pcmConversionWithoutAnOfficialOutputReportsUnsupported() {
         val sourceBytesPerChannel = 22_050
         val uri = publish("virtualdap-service-fixture.dsf", dsf(sourceBytesPerChannel))
 
@@ -48,15 +48,11 @@ class DsdPlaybackInstrumentedTest {
             state.fileName == "service fixture.dsf" &&
                 state.phase in setOf(DsdPlaybackPhase.COMPLETED, DsdPlaybackPhase.ERROR)
         }
-        assertEquals(result.lastError, DsdPlaybackPhase.COMPLETED, result.phase)
+        assertEquals(result.lastError, DsdPlaybackPhase.ERROR, result.phase)
         assertEquals("service fixture.dsf", result.fileName)
         assertEquals(DsdOutputMode.PCM_CONVERSION, result.mode)
-        assertEquals(sourceBytesPerChannel * 8L, result.sampleCountPerChannel)
-        assertEquals(result.sampleCountPerChannel, result.samplePosition)
-        assertEquals(2, result.format?.channelCount)
-        assertEquals(2_822_400, result.format?.sampleRate)
-        assertNotNull(result.outputFormat)
-        assertNull(result.lastError)
+        assertNull(result.outputFormat)
+        assertTrue(result.lastError.orEmpty().contains("official bit-perfect"))
     }
 
     @Test fun nativeModeWithoutAnExclusiveUsbRouteFailsInsteadOfFallingBackToPcm() {
@@ -72,7 +68,7 @@ class DsdPlaybackInstrumentedTest {
         )
 
         val result = awaitState { it.fileName == fileName && it.phase == DsdPlaybackPhase.ERROR }
-        assertTrue(result.lastError.orEmpty().contains("Exclusive USB"))
+        assertTrue(result.lastError.orEmpty().contains("official bit-perfect"))
         assertEquals(DsdOutputMode.NATIVE_DSD, result.mode)
         assertNull(result.outputFormat)
     }

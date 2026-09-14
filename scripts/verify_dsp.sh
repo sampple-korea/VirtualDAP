@@ -12,7 +12,7 @@ if [[ ! -f "$repo_root/third_party/libsamplerate/src/samplerate.c" ]]; then
     echo "Initialize resampler source with git submodule update --init third_party/libsamplerate" >&2
     exit 1
 fi
-"$cmake" -S "$repo_root/app/src/main/cpp" -B "$repo_root/native_runtime/build/dsp-host" \
+"$cmake" -S "$repo_root/app/src/main/cpp" -B "$repo_root/build/dsp-host" \
     -DCMAKE_BUILD_TYPE=Release
-"$cmake" --build "$repo_root/native_runtime/build/dsp-host" --parallel 2
-"${cmake%/cmake}/ctest" --test-dir "$repo_root/native_runtime/build/dsp-host" --output-on-failure
+"$cmake" --build "$repo_root/build/dsp-host" --parallel 2
+"${cmake%/cmake}/ctest" --test-dir "$repo_root/build/dsp-host" --output-on-failure

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Credentials
 import android.os.SystemClock
 import com.virtualdap.host.audio.AndroidAudioSink
-import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.*
 import com.virtualdap.host.model.*
@@ -13,10 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Independent host tracks let Android mix overlapping music/crossfade streams. A single active
- * stream can request USB bit-perfect; overlapping streams explicitly revoke that preference.
- */
+/** Independent capture sessions share exactly one official bit-perfect output lease. */
 class AudioSessionMixer(
     private val context: Context,
     private val notify: (String) -> Unit,
@@ -30,22 +26,20 @@ class AudioSessionMixer(
     @Volatile private var selectedRoute = PipelineStore.state.value.selectedRouteId
     @Volatile private var routeRevision = 0L
     private var playbackActive = false
+    private var outputOwner: Long? = null
+    private var lastOutputError: String? = null
 
     fun createSession(): BridgeEvents = Session(sequence.incrementAndGet())
 
     fun selectRoute(route: Int?) {
         selectedRoute = route
         routeRevision++
+        synchronized(topology) { lastOutputError = null }
         PipelineStore.update { it.copy(selectedRouteId = route, bitPerfectActive = false) }
         PipelineStore.log("Output selection changed; each active track will negotiate the new route")
     }
 
     private fun reconcile() = synchronized(topology) {
-        val exclusive = sessions.values.count { it.active } <= 1
-        sessions.values.forEach {
-            it.sink.setExclusiveAllowed(exclusive && it.active)
-            it.invalidateBitPerfect()
-        }
         publishLocked()
     }
 
@@ -70,6 +64,7 @@ class AudioSessionMixer(
             ) else selected.copy(
                 enabled = current.enabled, availableRoutes = current.availableRoutes,
                 selectedRouteId = current.selectedRouteId, logs = current.logs,
+                lastError = lastOutputError ?: selected.lastError,
                 connectedStreams = sessions.size, playingStreams = active.size,
                 bitPerfectActive = active.size == 1 && selected.bitPerfectActive,
                 guestDroppedBytes = sessions.values.sumOf { it.state.guestDroppedBytes },
@@ -86,7 +81,7 @@ class AudioSessionMixer(
     }
 
     private inner class Session(private val id: Long) : BridgeEvents {
-        val sink = RoutedAudioSink(context)
+        val sink = AndroidAudioSink(context)
         private val operations = Any()
         private val stateRef = AtomicReference(PipelineSnapshot())
         var state: PipelineSnapshot
@@ -105,8 +100,6 @@ class AudioSessionMixer(
             stateRef.updateAndGet(block)
             publish()
         }
-
-        fun invalidateBitPerfect() { stateRef.updateAndGet { it.copy(bitPerfectActive = false) } }
 
         override fun onGuestConnected(peer: Credentials, handshake: BridgeHandshake) = synchronized(operations) {
             check(!closed.get() && !disposed) { "Audio pipeline is closed" }
@@ -129,6 +122,12 @@ class AudioSessionMixer(
         }
 
         private fun configure() {
+            synchronized(topology) {
+                check(outputOwner == null || outputOwner == id) {
+                    "Official bit-perfect output is already owned by another track. Stop that track and disable crossfade."
+                }
+                outputOwner = id
+            }
             val format = state.sourceFormat ?: error("Missing source format")
             if (appliedRoute != routeRevision) {
                 sink.selectRoute(selectedRoute)
@@ -138,20 +137,21 @@ class AudioSessionMixer(
             if (configuredSource == format) return
             val result = sink.configure(format)
             configuredSource = format
+            synchronized(topology) { lastOutputError = null }
             update { it.copy(
                 sinkFormat = result.configured, sourcePreserved = result.sourcePreserved,
                 directPlayback = result.directPlayback, activeRoute = result.route,
                 bitPerfectActive = false, lastError = null,
             ) }
             PipelineStore.log("Stream $id output: ${result.configured.shortLabel()}" +
-                if (result.sourcePreserved) " · unchanged PCM" else " · compatibility conversion")
+                " · official bit-perfect PCM")
         }
 
         override fun onFormatChanged(format: PcmFormat, streamEpoch: Long) = synchronized(operations) {
             check(!disposed)
             state = state.copy(sourceFormat = format, phase = PipelinePhase.BUFFERING)
             positionBase = state.framesReceived
-            configure()
+            if (active) configure()
         }
 
         override fun onPcm(pcm: ByteArray, sequence: Long) = synchronized(operations) {
@@ -159,11 +159,6 @@ class AudioSessionMixer(
             configure()
             val source = state.sourceFormat ?: error("Missing source format")
             val count = sink.write(pcm)
-            val usb = sink.usbStatistics()
-            check(usb == null || usb.error == 0) { "Direct USB transfer failed (${usb?.error})" }
-            if (usb != null && usb.underruns > state.outputUnderruns) {
-                PipelineStore.log("Stream $id USB queue ran dry (${usb.underruns} times); no artificial samples were inserted", LogLevel.WARNING)
-            }
             val route = sink.routedOutput()
             val now = SystemClock.elapsedRealtime()
             val bitPerfect = if (now - lastMixerCheck >= 500 || route?.id != state.activeRoute?.id) {
@@ -175,8 +170,6 @@ class AudioSessionMixer(
                 framesReceived = it.framesReceived + count / source.frameSizeBytes,
                 latencyMs = sink.queuedDurationMs(), activeRoute = route ?: it.activeRoute,
                 bitPerfectActive = bitPerfect,
-                outputUnderruns = usb?.underruns ?: 0,
-                outputFramesCompleted = usb?.completedFrames,
             ) }
         }
 
@@ -212,6 +205,7 @@ class AudioSessionMixer(
                     sink.finish()
                     sink.setPlaying(false)
                     active = false
+                    synchronized(topology) { if (outputOwner == id) outputOwner = null }
                     configuredSource = null
                     positionBase = state.framesReceived
                     state = state.copy(phase = PipelinePhase.BUFFERING, bitPerfectActive = false)
@@ -230,8 +224,6 @@ class AudioSessionMixer(
         }
 
         override fun playbackPosition(): BridgePosition = synchronized(operations) {
-            val usb = sink.usbStatistics()
-            check(usb == null || usb.error == 0) { "Direct USB transfer failed (${usb?.error})" }
             val rate = state.sourceFormat?.sampleRate ?: 48_000
             val queued = ((sink.queuedDurationMs() ?: 0.0) * rate / 1_000.0).toLong()
             BridgePosition((state.framesReceived - positionBase - queued).coerceAtLeast(0), System.nanoTime())
@@ -252,7 +244,11 @@ class AudioSessionMixer(
                     active = false
                 }
             }
-            synchronized(topology) { sessions.remove(id) }
+            synchronized(topology) {
+                sessions.remove(id)
+                if (failureReason != null) lastOutputError = failureReason
+                if (outputOwner == id) outputOwner = null
+            }
             reconcile()
             if (!closed.get()) {
                 PipelineStore.log(failureReason?.let { "Stream $id disconnected: $it" } ?: "Stream $id completed",

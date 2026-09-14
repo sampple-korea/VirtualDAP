@@ -64,12 +64,6 @@ private fun testBundletoolToc(): ByteArray = testProtoBytes(
     testProtoString(4, "com.virtualdap.fixture.music"),
 )
 
-val prepareUsbLicense = tasks.register<Copy>("prepareUsbLicense") {
-    from(rootProject.file("third_party/libusb/COPYING"))
-    into(layout.buildDirectory.dir("generated/usbLicenseAssets/notices"))
-    rename { "libusb-LICENSE.txt" }
-}
-
 val prepareMusicFixture = tasks.register("prepareMusicFixture") {
     dependsOn(":musicFixture:assembleDebug", ":musicFeature:assembleDebug")
     val baseApk = project(":musicFixture").layout.buildDirectory.file("outputs/apk/debug/musicFixture-debug.apk")
@@ -112,7 +106,7 @@ android {
 
     defaultConfig {
         applicationId = "com.virtualdap.host"
-        minSdk = 33
+        minSdk = 34
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -134,7 +128,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
-        aidl = true
         compose = true
     }
     externalNativeBuild {
@@ -143,14 +136,12 @@ android {
             version = "3.22.1"
         }
     }
-    // Exercise the exact pure-JVM disk lifecycle used by the privileged AOSP runtime in CI.
-    sourceSets.getByName("test").kotlin.directories.add(rootProject.file("platform_runtime/core").path)
-    sourceSets.getByName("androidTest").kotlin.directories.add(rootProject.file("platform_runtime/input").path)
+    // Retained direct-USB sources are compiled only by JVM regression tests, never into the APK.
+    sourceSets.getByName("test").kotlin.directories.add(rootProject.file("compatibility/direct_usb/kotlin").path)
     sourceSets.getByName("androidTest").assets.directories.add(
         layout.buildDirectory.dir("generated/musicFixtureAssets").get().asFile.path,
     )
     sourceSets.getByName("main").assets.directories.add(rootProject.file("third_party/notices").path)
-    sourceSets.getByName("main").assets.directories.add(layout.buildDirectory.dir("generated/usbLicenseAssets").get().asFile.path)
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -163,9 +154,6 @@ android {
 }
 
 tasks.configureEach {
-    if (name == "preBuild" || name.contains("Lint") || name.matches(Regex("merge.*Assets"))) {
-        dependsOn(prepareUsbLicense)
-    }
     if (name == "mergeDebugAndroidTestAssets" ||
         name == "generateDebugAndroidTestLintModel" ||
         name == "lintAnalyzeDebugAndroidTest"

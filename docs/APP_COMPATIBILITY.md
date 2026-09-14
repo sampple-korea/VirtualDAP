@@ -5,28 +5,12 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |
-| VirtualDAP fixture, source-built debug | API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
+| VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
-## Historical installer probe — UAPP is not a catalog target
-
-UAPP's role is solely an implementation reference for the internal USB/DoP/DSD engine.
-Its supplied 7.1.2.3 ARM64 APK set was temporarily used to probe installer and ABI behavior:
-split import/signature verification succeeded; Application startup failed when loading
-`libauogg.so` (AARCH64 code in an x86_64 process). Playback was not tested.
-
-This result is an architecture-boundary issue in the container's foreign-ABI loading, not
-evidence that UAPP works or fails on a native ARM64 phone. Although this emulator advertises native
-bridge support, the container-created class-loader namespace did not use that translation path.
-Native ARM64 runtime testing or an implemented foreign-ABI bridge is still needed.
-
-User-supplied UAPP archive SHA-256:
-`4d0f0ff75dbaeafbf5757702c0d726df1ec856b8c8975e9fb0f631a1d1c8f07c`.
-Its proprietary APK/native libraries are not redistributed in this repository.
-
-The same set was temporarily used to check host-installed-app copying, which passed.
-UAPP has since been removed from the catalog and package-visibility queries to match its reference-only
-role. These probes do not make UAPP a supported music-service target or a dependency of VirtualDAP.
+The current minimum is API 34. The output policy now requires an officially supported bit-perfect
+route; historical mixed-output playback results are not evidence for that route. Current capture
+instrumentation uses a paced test receiver, separate from production output.
 
 ## Optional local compatibility smoke
 

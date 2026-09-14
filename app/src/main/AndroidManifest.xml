@@ -7,7 +7,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="com.virtualdap.host.permission.BIND_GUEST_RUNTIME" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
@@ -36,9 +35,6 @@
         <package android:name="com.audiomack" />
         <package android:name="com.anghami" />
         <package android:name="com.jio.media.jiobeats" />
-        <intent>
-            <action android:name="com.virtualdap.runtime.GUEST_RUNTIME" />
-        </intent>
     </queries>
 
     <application
@@ -60,9 +56,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
         </activity>
         <service
