@@ -116,9 +116,7 @@ jobs:
             adb shell am instrument -w -r com.virtualdap.host.test/androidx.test.runner.AndroidJUnitRunner > instrumentation.txt
             cat instrumentation.txt
             grep -Eq '^OK \([1-9][0-9]* tests?\)\r?$' instrumentation.txt
-            if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' instrumentation.txt; then
-              exit 1
-            fi
+            ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' instrumentation.txt
       - name: Upload instrumentation results
         if: always()
         uses: actions/upload-artifact@v4
