@@ -14,6 +14,10 @@ Implemented components:
 - `UsbDsdDeviceRules` keeps UAC `RAW_DATA` untrusted by default. It promotes only layouts listed by
   the source-pinned Linux USB-audio DSD hardware rules, including their firmware and device-level
   exclusions, and removes known DSD-only alternates from PCM candidate selection.
+- `DirectUsbDsdSink` composes those layouts with the real bounded USB transport. Native mode accepts
+  only a qualified profile; DoP accepts only an explicitly user-confirmed DAC and an exact 24-bit
+  carrier profile. Both paths bypass gain, PCM mixing and resampling, preserve partial-write order,
+  reset framing on flush and fail closed on truncated source words.
 - `DsdOutputPlanner` requires explicit output capabilities and a bit-transparent route before
   selecting native DSD or DoP. A generic PCM capability does not imply native DSD support.
 - `DsdPcmDecoder` wraps the source-pinned BSD-licensed `dsd2pcm` 96-tap filter. It keeps independent
@@ -31,8 +35,9 @@ bash scripts/verify_dsp.sh
 ```
 
 Direct USB PCM transport, endpoint/clock negotiation and device-specific native-DSD layout
-qualification are now implemented; see [the USB output scope and tests](USB_OUTPUT.md). The complete
-typed source-to-DSD-output connection remains integration work.
+qualification and the typed DSD-to-USB sink are now implemented; see
+[the USB output scope and tests](USB_OUTPUT.md). A product-facing DSF/DSDIFF source and playback
+controller remain integration work, so the UI does not yet advertise DSD file playback.
 The UI must not label those paths available merely because the framing and converter components
 build successfully. A DoP stream must never enter a normal PCM mixer, volume control or resampler.
 

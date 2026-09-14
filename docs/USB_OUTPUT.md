@@ -38,6 +38,12 @@ padding. Narrowing, float-to-integer conversion and application volume are expli
 USB completion counters describe host-controller transfers, not measured DAC presentation.
 Active playback holds a lifecycle-bound partial wake lock, including when AudioFlinger is bypassed.
 
+The typed DSD adapter accepts canonical time-ordered DSD bytes and connects them directly to this
+same bounded transport. Reference-qualified native U8/U16/U32 layouts preserve word/bit order.
+DoP framing uses an exact 24-bit carrier and requires explicit confirmation that the selected DAC
+supports DoP; a high advertised PCM rate alone is not treated as that proof. Neither DSD mode has a
+volume, mixer or sample-rate-conversion entry point.
+
 ## Current boundaries
 
 Direct USB currently reserves one active music stream. Use the Android output route for overlapping
@@ -47,9 +53,10 @@ the PCM path. Clock selectors/multipliers, implicit-feedback endpoints and vendo
 native-DSD quirks require further integration. The first matching PCM profile is tried; alternative
 retry after a clock rejection is not yet implemented.
 
-DoP framing and DSD-to-PCM filtering exist separately. The direct transport can carry opaque bytes,
-but native DSD/DoP source-to-output mode selection and device-specific qualification are **not yet
-complete**. A generic RAW descriptor or high PCM rate is not treated as proof of DSD support.
+Native DSD/DoP framing, qualified mode selection and direct transport composition are implemented
+and JVM-tested, but no product-facing DSF/DSDIFF reader currently invokes that sink. A generic RAW
+descriptor or high PCM rate is never treated as proof of DSD support. ITF mode-switch devices and
+other vendor sequences remain disabled until their control transactions are implemented.
 
 ## Validation without a DAC
 
@@ -58,8 +65,9 @@ backend and verifies exact bytes, fractional rates, feedback, pause/flush/drain,
 transfers, cancellation, short-packet failure, device disconnection, invalid feedback and descriptor
 ownership. These tests also passed AddressSanitizer and UndefinedBehaviorSanitizer locally.
 
-JVM tests cover PCM subslot packing, widening/narrowing, float handling and the complete PCM sink
-with partial writes and failing clock negotiation. Android instrumentation loads the actual native
+JVM tests cover PCM subslot packing, widening/narrowing, float handling, DSD word/DoP framing and the
+complete PCM and DSD sinks with partial writes, discontinuities, truncation and failing negotiation.
+Android instrumentation loads the actual native
 library, rejects a non-USB descriptor without closing the caller's descriptor, and retains the
 existing container/PCM/overlap/split-install tests.
 

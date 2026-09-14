@@ -19,6 +19,11 @@ data class DsdFormat(
     }
 
     val dopSampleRate: Int get() = sampleRate / 16
+
+    fun shortLabel(): String {
+        val baseRate = if (sampleRate % 44_100 == 0) 44_100 else 48_000
+        return "DSD${sampleRate / baseRate} · ${sampleRate / 1_000.0} kHz · $channelCount ch"
+    }
 }
 
 enum class DopContainer(val bytesPerSample: Int) {
@@ -69,6 +74,12 @@ class DopEncoder(
         check(pending.isEmpty()) { "DSD stream ends with an incomplete 16-sample DoP frame" }
     }
 
+    /** A seek/flush is a discontinuity, so no payload or marker state may cross it. */
+    fun reset() {
+        pending = ByteArray(0)
+        marker = 0x05
+    }
+
     private fun normalize(byte: Byte): Byte = when (format.bitOrder) {
         DsdBitOrder.MSB_FIRST -> byte
         DsdBitOrder.LSB_FIRST -> (Integer.reverse(byte.toInt() and 0xff) ushr 24).toByte()
@@ -110,6 +121,7 @@ class NativeDsdEncoder(private val format: DsdFormat, val layout: NativeDsdLayou
     }
 
     fun finish() { check(pending.isEmpty()) { "DSD source ends with an incomplete native transport word" } }
+    fun reset() { pending = ByteArray(0) }
 }
 
 enum class DsdOutputMode { NATIVE_DSD, DOP, PCM_CONVERSION }
