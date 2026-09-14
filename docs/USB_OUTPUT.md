@@ -1,18 +1,20 @@
-# Retained direct USB compatibility implementation
+# Direct USB output
 
-**Inactive in the product.** Sources are retained under `compatibility/direct_usb/kotlin`; native
-sources remain under `app/src/main/cpp/usb`. JVM and simulated native tests cover them. The normal
-APK contains no direct-USB Kotlin classes or USB transport shared library. The following describes
-the retained implementation, not a currently available output option.
+**Default product mode under validation.** Kotlin sources live under the historical
+`compatibility/direct_usb/kotlin` directory; native sources are under `app/src/main/cpp/usb`.
+The product build includes both layers for all four ABIs. JVM and simulated native tests cover
+protocol behavior; they do not establish successful playback on a particular physical DAC.
 
 
 VirtualDAP contains its own independently implemented USB output path.
 
 ## Selection and permissions
 
-The retained controller supports explicit Android USB permission and descriptor inspection.
-A future compatibility mode must wire these controls deliberately; current Diagnostics and the
-output selector expose only official Android bit-perfect capability discovery.
+The output screen provides explicit Android USB permission and device selection. USB output is
+the default; Android official bit-perfect is an advanced mode and does not take over automatically.
+Initial USB software volume is 25%, independent of Android system volume. Changing volume away
+from unity invalidates bit-preserved status. DoP/native DSD do not apply software volume and need
+an explicit DAC-support and safe-hardware-volume confirmation.
 
 The native engine wraps a duplicate of the descriptor obtained from `UsbManager.openDevice`.
 It does not enumerate native USB device nodes, open arbitrary `/dev/bus/usb` paths, require root,
@@ -61,14 +63,14 @@ volume, mixer or sample-rate-conversion entry point.
 
 ## Current boundaries
 
-The retained direct sink reserves one active music stream. Neither the current official route nor
-the retained sink supports overlapping output tracks. Ambiguous multi-format and RAW alternatives are excluded from the PCM path. Channel fallback
+The direct sink reserves one active music stream. Neither the official route nor the direct sink
+supports overlapping output tracks. Ambiguous multi-format and RAW alternatives are excluded from the PCM path. Channel fallback
 supports exact layouts, mono/stereo expansion, stereo/mono conversion and multichannel-to-stereo or
 mono downmix; it does not invent arbitrary surround channels. Implicit-feedback endpoints and
 vendor-specific feedback/native-DSD quirks require further integration.
 
-Native DSD/DoP framing, qualified mode selection and direct transport composition remain
-JVM-tested but are disconnected from the foreground DSF/DSDIFF player. A generic RAW descriptor or high PCM rate is never
+Native DSD/DoP framing, qualified mode selection and direct transport composition are connected
+to the foreground DSF/DSDIFF tool. A generic RAW descriptor or high PCM rate is never
 treated as proof of DSD support. ITF mode-switch devices and other vendor sequences remain disabled
 until their control transactions are implemented.
 
@@ -82,15 +84,24 @@ ownership. These tests also passed AddressSanitizer and UndefinedBehaviorSanitiz
 JVM tests cover PCM subslot packing, 20/24/32-bit widening/narrowing, float handling, format-family
 planning, alternate-setting retry, bounded conversion, DSD word/DoP framing and the complete PCM and
 DSD sinks with partial writes, discontinuities, truncation and failing negotiation. Current Android
-instrumentation loads only the product DSP libraries and verifies best-sinc packet continuity and
-pass/stop-band behavior. Direct USB JNI is no longer loaded by product instrumentation.
+instrumentation verifies best-sinc packet continuity and pass/stop-band behavior. Additional
+USB-mode checks load the packaged JNI with an invalid descriptor, reject a missing USB device
+without Android fallback, and check Korean home/Tools navigation. Passing results must be recorded
+after running these checks; test source alone is not evidence.
 The container/PCM/overlap/split-install tests use a separate paced capture receiver.
+
+The initial default-USB/Korean-UI integration passed debug build/lint, 112 JVM tests, all 15
+ordinary-UID API 36 instrumentation tests (98.914 seconds), three DSP/USB native tests, two
+container transport tests, 12 prepared-source checks and the updated APK boundary check.
+The new instrumentation executed the packaged USB JNI rejection path, missing-device/no-fallback
+path, Korean music-home/Tools navigation and explicit USB/official mode changes. Actual physical
+DAC transfers remain outside the test scope; this is not a FreeDSP certification.
 
 No physical DAC, USB analyzer or analog output has been tested. This is code/protocol validation,
 not a claim of measured hardware playback.
 
-libusb's full LGPL license and source/build provenance remain in the repository; the current APK
-does not package its binary or generated license asset. The BSD-licensed
+libusb's full LGPL license and source/build provenance remain in the repository; its full license
+is copied into the APK by `prepareUsbNotices`. The BSD-licensed
 libsamplerate source is pinned at `0844c208f683527c08ea8a80acc13b398aa9c8bf`, and its license is
 included in the same assets. Upstream:
 [libusb Android integration](https://github.com/libusb/libusb/tree/v1.0.30/android),

@@ -11,8 +11,10 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 | foobar2000 mobile 2.25.9, version code 1093, official x86_64 APK | API 36 Google APIs x86_64, ordinary UID | Verified APK import | Application.onCreate and the visible welcome screen verified, including resumed-activity and live-process evidence | Not tested; a welcome screen is not playback verification |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
-The current minimum is API 34. The output policy now requires an officially supported bit-perfect
-route; historical mixed-output playback results are not evidence for that route. Current capture
+The current minimum is API 34. USB audio is now the default product mode, with official bit-perfect
+as an explicitly selected advanced mode. Earlier results below describe the official-only builds
+on which they were obtained, not later USB integration. Historical mixed-output results do not
+establish either current output contract. Current capture
 instrumentation uses a paced test receiver, separate from production output.
 
 At commit `959a2c4`, GitHub run `34818766657` passed the host build and ordinary-UID fixture

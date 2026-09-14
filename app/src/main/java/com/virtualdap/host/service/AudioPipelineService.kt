@@ -22,6 +22,10 @@ import androidx.core.app.ServiceCompat
 import com.virtualdap.host.MainActivity
 import com.virtualdap.host.R
 import com.virtualdap.host.audio.AndroidAudioSink
+import com.virtualdap.host.audio.RoutedAudioSink
+import com.virtualdap.host.audio.usb.UsbHostController
+import com.virtualdap.host.model.OutputRoutePolicy
+import com.virtualdap.host.model.OutputMode
 import com.virtualdap.host.audio.DsdContainerReader
 import com.virtualdap.host.audio.DsdDopPacketOutput
 import com.virtualdap.host.audio.DsdOutputMode
@@ -29,6 +33,8 @@ import com.virtualdap.host.audio.DsdPacketOutput
 import com.virtualdap.host.audio.DsdPlaybackEvent
 import com.virtualdap.host.audio.DsdPlaybackTask
 import com.virtualdap.host.audio.DsdPcmPacketOutput
+import com.virtualdap.host.audio.UsbDsdPcmPacketOutput
+import com.virtualdap.host.audio.DirectDsdPacketOutput
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.BridgePeerPolicy
@@ -58,6 +64,10 @@ class AudioPipelineService : Service() {
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (!serviceStarted) return
+            // Claiming the USB interface can remove AudioFlinger's route without unplugging the
+            // physical device. UsbManager detach/permission and native I/O handle real USB loss.
+            if (PipelineStore.state.value.outputMode == OutputMode.USB &&
+                UsbHostController.isDirectDeviceConnected(PipelineStore.state.value.selectedRouteId)) return
             if (activeDsd != null) {
                 stopDsd("Audio output disconnected during DSD playback")
                 return
@@ -76,6 +86,8 @@ class AudioPipelineService : Service() {
         super.onCreate()
         audioManager = getSystemService(AudioManager::class.java)
         routes = AndroidAudioSink(this)
+        UsbHostController.initialize(this)
+        scope.launch { UsbHostController.state.collect { refreshRoutes() } }
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
         registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED)
         refreshRoutes()
@@ -91,6 +103,14 @@ class AudioPipelineService : Service() {
                 stopPipeline(true)
             }
             ACTION_SELECT_ROUTE -> selectRoute(intent?.getIntExtra(EXTRA_ROUTE_ID, DEFAULT_ROUTE_ID) ?: DEFAULT_ROUTE_ID)
+            ACTION_SELECT_MODE -> {
+                val mode = intent?.getStringExtra(EXTRA_OUTPUT_MODE)?.let { requested ->
+                    OutputMode.entries.firstOrNull { it.name == requested }
+                }
+                if (mode != null && !serviceStarted && activeDsd == null && !selfTestRunning.get()) {
+                    PipelineStore.update { it.copy(outputMode = mode, selectedRouteId = null, lastError = null) }
+                }
+            }
             ACTION_SELF_TEST -> runOutputSelfTest()
             ACTION_PLAY_DSD -> intent?.let(::startDsd)
             ACTION_PAUSE_DSD -> pauseDsd()
@@ -110,14 +130,12 @@ class AudioPipelineService : Service() {
             PipelineStore.log("Stop local DSD playback before starting the music-app bridge", LogLevel.WARNING)
             return
         }
-        val selected = PipelineStore.state.value.let { state ->
-            state.availableRoutes.firstOrNull {
-                it.id == state.selectedRouteId && it.officialBitPerfectFormats.isNotEmpty()
-            }
-        }
+        val selected = OutputRoutePolicy.selected(PipelineStore.state.value)
         if (selected == null) {
             PipelineStore.update {
-                it.copy(phase = PipelinePhase.ERROR, lastError = "Select an output supported by Android's official bit-perfect path")
+                it.copy(phase = PipelinePhase.ERROR, lastError =
+                    if (it.outputMode == OutputMode.USB) "USB DAC의 접근 권한을 허용하고 출력 장치를 선택해 주세요."
+                    else "Select an output supported by Android's official bit-perfect path")
             }
             PipelineStore.log("Music bridge not started: no supported official bit-perfect output is selected", LogLevel.ERROR)
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -174,7 +192,7 @@ class AudioPipelineService : Service() {
         }
         val selected = routeId.takeUnless { it == DEFAULT_ROUTE_ID }?.let { requested ->
             PipelineStore.state.value.availableRoutes.firstOrNull {
-                it.id == requested && it.officialBitPerfectFormats.isNotEmpty()
+                it.id == requested && OutputRoutePolicy.eligible(it, PipelineStore.state.value.outputMode)
             }?.id
         }
         mixer?.selectRoute(selected)
@@ -189,10 +207,10 @@ class AudioPipelineService : Service() {
     }
 
     private fun refreshRoutes() {
-        val available = routes.routes()
+        val available = routes.routes() + UsbHostController.routes()
         val old = PipelineStore.state.value.selectedRouteId
         val selected = old?.takeIf { id ->
-            available.any { it.id == id && it.officialBitPerfectFormats.isNotEmpty() }
+            available.any { it.id == id && OutputRoutePolicy.eligible(it, PipelineStore.state.value.outputMode) }
         }
         PipelineStore.update { it.copy(availableRoutes = available, selectedRouteId = selected) }
         if (selected != old) {
@@ -223,7 +241,7 @@ class AudioPipelineService : Service() {
         updatePlaybackWakeLock(true)
         thread(name = "VirtualDAP-self-test") {
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
-            val testSink = AndroidAudioSink(this)
+            val testSink = RoutedAudioSink(this)
             try {
                 if (PipelineStore.state.value.guestConnected) return@thread
                 testSink.selectRoute(PipelineStore.state.value.selectedRouteId)
@@ -389,12 +407,17 @@ class AudioPipelineService : Service() {
                 if (active.cancelError != null || Thread.currentThread().isInterrupted) {
                     throw CancellationException("DSD playback cancelled while opening the file")
                 }
-                val selectedRoute = PipelineStore.state.value.let { state ->
-                    state.availableRoutes.firstOrNull {
-                        it.id == state.selectedRouteId && it.officialBitPerfectFormats.isNotEmpty()
+                val selectedRoute = OutputRoutePolicy.selected(PipelineStore.state.value)
+                    ?: error("사용할 출력 장치를 먼저 선택해 주세요")
+                val openedOutput = if (selectedRoute.directUsbDeviceId != null) {
+                    if (mode == DsdOutputMode.PCM_CONVERSION) UsbDsdPcmPacketOutput(this, selectedRoute, openedReader.format)
+                    else {
+                        check(intent.getBooleanExtra(EXTRA_DOP_CONFIRMED, false)) {
+                            "DAC의 DSD 지원과 안전한 하드웨어 음량을 확인해 주세요"
+                        }
+                        DirectDsdPacketOutput(selectedRoute.directUsbDeviceId, selectedRoute, openedReader.format, mode, true)
                     }
-                } ?: error("Select an output supported by Android's official bit-perfect path")
-                val openedOutput = when (mode) {
+                } else when (mode) {
                     DsdOutputMode.PCM_CONVERSION -> DsdPcmPacketOutput(
                         this,
                         selectedRoute,
@@ -458,6 +481,11 @@ class AudioPipelineService : Service() {
 
     private fun dsdOutputSnapshot(output: DsdPacketOutput?, fallbackRoute: com.virtualdap.host.model.OutputRoute?) =
         when (output) {
+            is DirectDsdPacketOutput -> DsdOutputSnapshot(null, output.routedOutput() ?: fallbackRoute,
+                output.configuration.transportRate, output.configuration.qualification)
+            is UsbDsdPcmPacketOutput -> DsdOutputSnapshot(output.configuration.configured,
+                output.routedOutput() ?: fallbackRoute, output.configuration.configured.sampleRate,
+                "DSD를 PCM으로 변환한 USB 출력 — DSD 원본 비트퍼펙트가 아닙니다")
             is DsdDopPacketOutput -> DsdOutputSnapshot(
                 output.outputFormat,
                 output.routedOutput() ?: fallbackRoute,
@@ -476,7 +504,11 @@ class AudioPipelineService : Service() {
     private fun handleDsdEvent(active: ActiveDsd, output: DsdPacketOutput?, event: DsdPlaybackEvent) {
         if (activeDsd !== active) return
         val outputState = dsdOutputSnapshot(output, PipelineStore.state.value.dsdPlayback.outputRoute)
-        val preserved = output is DsdDopPacketOutput && output.sourcePreserved()
+        val preserved = when (output) {
+            is DsdDopPacketOutput -> output.sourcePreserved()
+            is DirectDsdPacketOutput -> output.sourcePreservedActive()
+            else -> false
+        }
         when (event) {
             is DsdPlaybackEvent.Started -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
@@ -597,6 +629,8 @@ class AudioPipelineService : Service() {
         const val ACTION_START = "com.virtualdap.host.action.START"
         const val ACTION_STOP = "com.virtualdap.host.action.STOP"
         const val ACTION_SELECT_ROUTE = "com.virtualdap.host.action.SELECT_ROUTE"
+        const val ACTION_SELECT_MODE = "com.virtualdap.host.action.SELECT_MODE"
+        const val EXTRA_OUTPUT_MODE = "output_mode"
         const val ACTION_SELF_TEST = "com.virtualdap.host.action.SELF_TEST"
         const val ACTION_PLAY_DSD = "com.virtualdap.host.action.PLAY_DSD"
         const val ACTION_PAUSE_DSD = "com.virtualdap.host.action.PAUSE_DSD"
@@ -609,6 +643,11 @@ class AudioPipelineService : Service() {
         const val DEFAULT_ROUTE_ID = -1
         private const val CHANNEL_ID = "virtualdap_audio"
         private const val NOTIFICATION_ID = 42
+
+        fun selectMode(context: Context, mode: OutputMode) {
+            context.startService(Intent(context, AudioPipelineService::class.java)
+                .setAction(ACTION_SELECT_MODE).putExtra(EXTRA_OUTPUT_MODE, mode.name))
+        }
 
         fun command(context: Context, action: String, routeId: Int? = null) {
             val intent = Intent(context, AudioPipelineService::class.java).setAction(action)

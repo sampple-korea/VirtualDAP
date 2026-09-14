@@ -93,7 +93,12 @@ class AndroidAudioSink(context: Context) : Closeable {
     fun routes(): List<OutputRoute> = audioManager
         .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         .filterNot { it.type == AudioDeviceInfo.TYPE_TELEPHONY }
-        .map { device -> device.toOutputRoute(bitPerfectMixers(device)) }
+        .map { device ->
+            val query = runCatching { queryBitPerfectMixers(device) }
+            device.toOutputRoute(query.getOrDefault(emptyList())).copy(
+                officialQueryFailure = query.exceptionOrNull()?.javaClass?.simpleName,
+            )
+        }
         .sortedWith(
             compareByDescending<OutputRoute> { it.officialBitPerfectFormats.isNotEmpty() }
                 .thenByDescending { it.isUsb }
@@ -344,12 +349,16 @@ class AndroidAudioSink(context: Context) : Closeable {
         lastPlaybackHead = 0
     }
 
-    private fun bitPerfectMixers(device: AudioDeviceInfo): List<AudioMixerAttributes> = runCatching {
+    private fun queryBitPerfectMixers(device: AudioDeviceInfo): List<AudioMixerAttributes> =
         audioManager.getSupportedMixerAttributes(device).filter {
-            it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
-                it.format.toPcmFormatOrNull() != null
+            it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT
         }
-    }.getOrDefault(emptyList())
+
+    private fun bitPerfectMixers(device: AudioDeviceInfo): List<AudioMixerAttributes> = try {
+        queryBitPerfectMixers(device)
+    } catch (error: Exception) {
+        throw AudioSinkException("Could not query official bit-perfect support (${error.javaClass.simpleName})")
+    }
 
     private fun AudioDeviceInfo.toOutputRoute(mixers: List<AudioMixerAttributes>) = OutputRoute(
         id = id,
@@ -359,6 +368,7 @@ class AndroidAudioSink(context: Context) : Closeable {
         sampleRates = sampleRates.toList().sorted(),
         encodings = encodings.toList().sorted(),
         officialBitPerfectFormats = mixers.mapNotNull { it.format.toPcmFormatOrNull() }.distinct(),
+        officialBitPerfectReported = mixers.isNotEmpty(),
     )
 
     private fun AudioDeviceInfo.displayName(): String =

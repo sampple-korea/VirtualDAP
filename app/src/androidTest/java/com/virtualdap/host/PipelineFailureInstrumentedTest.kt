@@ -45,7 +45,7 @@ class PipelineFailureInstrumentedTest {
     @Suppress("DEPRECATION")
     @Test fun unsupportedStartRemainsAnErrorAfterTheRealServiceStops() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        PipelineStore.update { PipelineSnapshot() } // Deliberately no selected official output.
+        PipelineStore.update { PipelineSnapshot(outputMode = OutputMode.OFFICIAL_BIT_PERFECT) } // Deliberately no selected official output.
         AudioPipelineService.command(context, AudioPipelineService.ACTION_START)
         val manager = context.getSystemService(ActivityManager::class.java)
         val deadline = SystemClock.elapsedRealtime() + 10_000

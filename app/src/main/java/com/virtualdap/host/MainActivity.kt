@@ -1,1164 +1,396 @@
 package com.virtualdap.host
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.List
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Headphones
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PhoneAndroid
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Speaker
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Usb
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLocale
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.virtualdap.host.audio.AndroidAudioSink
+import com.virtualdap.host.audio.DsdOutputMode
+import com.virtualdap.host.audio.usb.UsbHostController
+import com.virtualdap.host.audio.usb.UsbHostSnapshot
 import com.virtualdap.host.container.ContainerPhase
 import com.virtualdap.host.container.ContainerRuntime
 import com.virtualdap.host.container.ContainerSnapshot
-import com.virtualdap.host.audio.DsdOutputMode
-import com.virtualdap.host.model.AppAudioPath
-import com.virtualdap.host.model.DsdPlaybackPhase
-import com.virtualdap.host.model.LogLevel
-import com.virtualdap.host.model.MusicAppCatalog
-import com.virtualdap.host.model.OutputRoute
-import com.virtualdap.host.model.PipelinePhase
-import com.virtualdap.host.model.PipelineSnapshot
+import com.virtualdap.host.model.*
 import com.virtualdap.host.service.AudioPipelineService
+import com.virtualdap.host.service.OutputSupportPresentation
 import com.virtualdap.host.service.PipelineStore
-import com.virtualdap.host.ui.theme.Amber
-import com.virtualdap.host.ui.theme.Ink
-import com.virtualdap.host.ui.theme.Mint
-import com.virtualdap.host.ui.theme.Muted
-import com.virtualdap.host.ui.theme.Panel
 import com.virtualdap.host.ui.theme.VirtualDAPTheme
-import java.text.SimpleDateFormat
-import java.util.Date
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private val outputDevices = object : android.media.AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) = refreshOutputs()
-        override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>) = refreshOutputs()
+    private val outputs = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = refreshOutputs()
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = refreshOutputs()
     }
     private fun refreshOutputs() {
-        com.virtualdap.host.audio.AndroidAudioSink(this).use { discovery ->
-            val available = discovery.routes()
-            PipelineStore.update { it.copy(availableRoutes = available) }
+        AndroidAudioSink(this).use { discovery ->
+            val routes = discovery.routes() + UsbHostController.routes()
+            PipelineStore.update { it.copy(availableRoutes = routes) }
         }
+    }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        UsbHostController.initialize(this)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                UsbHostController.state.collect { refreshOutputs() }
+            }
+        }
+        setContent { VirtualDAPTheme { VirtualDAPApp() } }
     }
     override fun onStart() {
         super.onStart()
-        getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(outputDevices, null)
+        getSystemService(AudioManager::class.java).registerAudioDeviceCallback(outputs, null)
+        UsbHostController.refresh()
         refreshOutputs()
     }
     override fun onStop() {
-        getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(outputDevices)
+        getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(outputs)
         super.onStop()
     }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-        )
-        setContent { VirtualDAPTheme { VirtualDAPApp() } }
-    }
-}
-
-private enum class AppSection(val label: String, val icon: ImageVector) {
-    PLAYER("Player", Icons.Rounded.Headphones),
-    GUEST("Music space", Icons.Rounded.PhoneAndroid),
-    APPS("Apps", Icons.Rounded.LibraryMusic),
-    DIAGNOSTICS("Diagnostics", Icons.AutoMirrored.Rounded.List),
 }
 
 @Composable
 private fun VirtualDAPApp() {
     val context = LocalContext.current
-    val snapshot by PipelineStore.state.collectAsStateWithLifecycle()
-    val containerSnapshot by ContainerRuntime.state.collectAsStateWithLifecycle()
-    var selectedSection by rememberSaveable { mutableStateOf(AppSection.PLAYER) }
-    var pendingPermissionAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
-    var pendingPackageName by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedDsdUri by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedDsdName by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingDsdUri by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingDsdName by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingDsdMode by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION.name) }
-    var pendingDopConfirmation by rememberSaveable { mutableStateOf(false) }
-    val bundlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val audio by PipelineStore.state.collectAsStateWithLifecycle()
+    val apps by ContainerRuntime.state.collectAsStateWithLifecycle()
+    val usb by UsbHostController.state.collectAsStateWithLifecycle()
+    var outputTab by rememberSaveable { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var tool by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
+    var pendingPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    var dsdUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var dsdName by rememberSaveable { mutableStateOf<String?>(null) }
+    var dsdMode by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION) }
+    var dsdConfirmed by rememberSaveable { mutableStateOf(false) }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(ContainerRuntime::install)
     }
-    val dsdPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }.onFailure {
-                PipelineStore.log("The selected DSD file grant lasts only for this app session", LogLevel.WARNING)
-            }
-            selectedDsdUri = uri.toString()
-            selectedDsdName = queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "Selected DSD file"
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            dsdUri = uri.toString()
+            dsdName = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                }
+            }.getOrNull() ?: "선택한 DSD 파일"
         }
     }
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
-        if (pendingPermissionAction == AudioPipelineService.ACTION_PLAY_DSD) {
-            pendingDsdUri?.let(Uri::parse)?.let { uri ->
-                AudioPipelineService.playDsd(
-                    context,
-                    uri,
-                    DsdOutputMode.valueOf(pendingDsdMode),
-                    pendingDopConfirmation,
-                    pendingDsdName,
-                )
-            }
-        } else AudioPipelineService.command(context, pendingPermissionAction)
-        pendingPackageName?.let(ContainerRuntime::launch)
-        pendingPackageName = null
-        pendingDsdUri = null
-        pendingDsdName = null
-    }
-
-    fun startWithPermission(action: String, packageName: String? = null) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendingPermissionAction = action
-            pendingPackageName = packageName
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    fun performAction(action: String, packageName: String?) {
+        if (action == AudioPipelineService.ACTION_PLAY_DSD) {
+            dsdUri?.let { AudioPipelineService.playDsd(context, Uri.parse(it), dsdMode, dsdConfirmed, dsdName) }
         } else {
             AudioPipelineService.command(context, action)
             packageName?.let(ContainerRuntime::launch)
         }
     }
-
-    fun playDsdWithPermission(mode: DsdOutputMode, dopConfirmed: Boolean) {
-        val uri = selectedDsdUri?.let(Uri::parse) ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendingPermissionAction = AudioPipelineService.ACTION_PLAY_DSD
-            pendingDsdUri = uri.toString()
-            pendingDsdName = selectedDsdName
-            pendingDsdMode = mode.name
-            pendingDopConfirmation = dopConfirmed
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else AudioPipelineService.playDsd(context, uri, mode, dopConfirmed, selectedDsdName)
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        performAction(pendingAction, pendingPackage)
+        pendingPackage = null
     }
-
+    fun start(action: String, packageName: String? = null) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            pendingAction = action
+            pendingPackage = packageName
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else performAction(action, packageName)
+    }
     Scaffold(
-        containerColor = Ink,
-        bottomBar = {
-            NavigationBar(containerColor = Panel.copy(alpha = 0.98f)) {
-                AppSection.entries.forEach { section ->
-                    NavigationBarItem(
-                        selected = selectedSection == section,
-                        onClick = { selectedSection = section },
-                        icon = { Icon(section.icon, contentDescription = null) },
-                        label = { Text(section.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Ink,
-                            selectedTextColor = Amber,
-                            indicatorColor = Amber,
-                            unselectedIconColor = Muted,
-                            unselectedTextColor = Muted,
-                        ),
-                    )
+        topBar = {
+            Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("VirtualDAP", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Box {
+                    TextButton(onClick = { menuOpen = true }) { Text("도구") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        listOf("진단", "출력 소리 테스트", "로컬 DSD 파일").forEach { name ->
+                            DropdownMenuItem(text = { Text(name) }, onClick = { menuOpen = false; tool = name })
+                        }
+                    }
                 }
             }
         },
-    ) { insets ->
-        AnimatedContent(
-            targetState = selectedSection,
-            label = "section",
-            modifier = Modifier.padding(insets),
-        ) { section ->
-            when (section) {
-                AppSection.PLAYER -> PlayerScreen(
-                    snapshot = snapshot,
-                    selectedDsdName = selectedDsdName,
-                    hasSelectedDsd = selectedDsdUri != null,
-                    onChooseDsd = {
-                        dsdPicker.launch(arrayOf("audio/*", "application/octet-stream"))
-                    },
-                    onPlayDsd = ::playDsdWithPermission,
-                    onPauseDsd = {
-                        AudioPipelineService.command(context, AudioPipelineService.ACTION_PAUSE_DSD)
-                    },
-                    onResumeDsd = {
-                        AudioPipelineService.command(context, AudioPipelineService.ACTION_RESUME_DSD)
-                    },
-                    onStopDsd = {
-                        AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP_DSD)
-                    },
-                    onStart = { startWithPermission(AudioPipelineService.ACTION_START) },
-                    onStop = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP) },
-                    onSelectRoute = { route ->
-                        AudioPipelineService.command(
-                            context,
-                            AudioPipelineService.ACTION_SELECT_ROUTE,
-                            route?.id ?: AudioPipelineService.DEFAULT_ROUTE_ID,
-                        )
-                    },
-                )
-                AppSection.GUEST -> MusicSpaceScreen(
-                    snapshot = containerSnapshot,
-                    onImport = {
-                        bundlePicker.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream"))
-                    },
-                    onLaunch = { startWithPermission(AudioPipelineService.ACTION_START, packageName = it) },
-                    onStop = ContainerRuntime::stop,
-                    onRefresh = ContainerRuntime::refresh,
-                )
-                AppSection.APPS -> AppsScreen()
-                AppSection.DIAGNOSTICS -> DiagnosticsScreen(
-                    snapshot = snapshot,
-                    onSelfTest = { startWithPermission(AudioPipelineService.ACTION_SELF_TEST) },
-                )
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(selected = !outputTab, onClick = { outputTab = false },
+                    icon = { Icon(Icons.Rounded.LibraryMusic, null) }, label = { Text("음악 앱") })
+                NavigationBarItem(selected = outputTab, onClick = { outputTab = true },
+                    icon = { Icon(Icons.Rounded.Usb, null) }, label = { Text("오디오 출력") })
             }
+        },
+    ) { padding ->
+        Box(Modifier.padding(padding)) {
+            if (outputTab) OutputScreen(audio, usb)
+            else MusicScreen(apps, audio, onImport = {
+                import.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream"))
+            }, onLaunch = { start(AudioPipelineService.ACTION_START, it) }, onOutput = { outputTab = true })
         }
     }
-}
-
-@Composable
-private fun MusicSpaceScreen(
-    snapshot: ContainerSnapshot,
-    onImport: () -> Unit,
-    onLaunch: (String) -> Unit,
-    onStop: (String) -> Unit,
-    onRefresh: () -> Unit,
-) {
-    val busy = snapshot.phase == ContainerPhase.INITIALIZING || snapshot.phase == ContainerPhase.INSTALLING
-    var chooseInstalled by rememberSaveable { mutableStateOf(false) }
-    if (chooseInstalled) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { chooseInstalled = false },
-            title = { Text("Add an installed music app") },
+    tool?.let { title ->
+        AlertDialog(onDismissRequest = { tool = null }, title = { Text(title) },
+            confirmButton = { TextButton(onClick = { tool = null }) { Text("닫기") } },
             text = {
-                Column {
-                    Text("Copies the app into your music space, not its accounts or private data. Sign in separately inside the imported app.")
-                    Spacer(Modifier.height(12.dp))
-                    if (snapshot.hostApplications.isEmpty()) {
-                        Text("No catalog music apps were found on this device. Install one from its usual store, then refresh this list, or choose an APK file.")
-                    } else {
-                        LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(snapshot.hostApplications, key = { it.packageName }) { app ->
-                                OutlinedButton(
-                                    onClick = {
-                                        chooseInstalled = false
-                                        ContainerRuntime.importHostApp(app.packageName)
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text(app.name) }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    when (title) {
+                        "진단" -> {
+                            item { Text("USB 연결 여부와 Android 공식 경로 지원 여부는 서로 다릅니다.") }
+                            items(audio.availableRoutes, key = { it.id }) { route ->
+                                Text(route.name, fontWeight = FontWeight.Bold)
+                                Text("${routeKind(route)} · 경로 ${route.id}")
+                                if (route.directUsbDeviceId != null) Text("직접 USB · 실제 지원 포맷은 재생 시 DAC와 협상합니다.")
+                                else Text(OutputSupportPresentation.officialStatus(route))
+                                HorizontalDivider()
                             }
+                            item { Text("수신 ${audio.framesReceived} 프레임 · USB 완료 ${audio.outputFramesCompleted ?: 0} 프레임\n" +
+                                "출력 언더런 ${audio.outputUnderruns} · 전송 손실 ${audio.guestDroppedBytes} 바이트") }
+                            items(audio.logs.takeLast(20).reversed()) { Text(it.message, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        "출력 소리 테스트" -> item {
+                            Text("선택한 출력으로 낮은 음량의 440 Hz 소리를 2초간 재생합니다. 음악 앱이나 전체 경로의 검증은 아닙니다.")
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { start(AudioPipelineService.ACTION_SELF_TEST) },
+                                enabled = !audio.guestConnected && !audio.dsdPlayback.active && OutputRoutePolicy.selected(audio) != null) {
+                                Text("소리 테스트 시작")
+                            }
+                        }
+                        else -> item {
+                            Text("DSF / DSDIFF 파일용 보조 도구입니다. 음악 서비스는 기본 화면에서 실행하세요.")
+                            TextButton(onClick = { filePicker.launch(arrayOf("audio/*", "application/octet-stream")) },
+                                enabled = !audio.dsdPlayback.active) { Text(dsdName ?: "파일 선택") }
+                            DsdOutputMode.entries.filter {
+                                audio.outputMode == OutputMode.USB || it != DsdOutputMode.NATIVE_DSD
+                            }.forEach { mode ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selected = dsdMode == mode, onClick = { dsdMode = mode; dsdConfirmed = false },
+                                        enabled = !audio.dsdPlayback.active)
+                                    Text(dsdModeName(mode))
+                                }
+                            }
+                            if (dsdMode != DsdOutputMode.PCM_CONVERSION) {
+                                Text("DoP / 네이티브 DSD는 소프트웨어 볼륨을 적용하지 않습니다. DAC의 지원과 안전한 하드웨어 음량을 먼저 확인하세요.")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = dsdConfirmed, onCheckedChange = { dsdConfirmed = it })
+                                    Text("DAC 지원 및 음량을 확인했습니다")
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { start(AudioPipelineService.ACTION_PLAY_DSD) }, enabled = dsdUri != null &&
+                                    !audio.dsdPlayback.active && !audio.guestConnected && OutputRoutePolicy.selected(audio) != null &&
+                                    (dsdMode == DsdOutputMode.PCM_CONVERSION || dsdConfirmed)) { Text("재생") }
+                                TextButton(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP_DSD) },
+                                    enabled = audio.dsdPlayback.active) { Text("중지") }
+                            }
+                            if (audio.dsdPlayback.phase == DsdPlaybackPhase.PLAYING || audio.dsdPlayback.phase == DsdPlaybackPhase.PAUSED) {
+                                TextButton(onClick = { AudioPipelineService.command(context,
+                                    if (audio.dsdPlayback.phase == DsdPlaybackPhase.PAUSED) AudioPipelineService.ACTION_RESUME_DSD
+                                    else AudioPipelineService.ACTION_PAUSE_DSD) }) {
+                                    Text(if (audio.dsdPlayback.phase == DsdPlaybackPhase.PAUSED) "계속 재생" else "일시정지")
+                                }
+                            }
+                            Text("진행 ${(audio.dsdPlayback.progress * 100).toInt()}%")
+                            audio.dsdPlayback.lastError?.let { ErrorText(it) }
                         }
                     }
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { chooseInstalled = false }) { Text("Close") }
-            },
-        )
+            })
     }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+}
+
+@Composable
+private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImport: () -> Unit,
+    onLaunch: (String) -> Unit, onOutput: () -> Unit) {
+    var showHostApps by rememberSaveable { mutableStateOf(false) }
+    val ready = apps.phase == ContainerPhase.READY
+    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            ScreenHeader(
-                eyebrow = "Music space",
-                title = "Your apps. Your audio.",
-                subtitle = "Add music apps to a separate app space. Runs on your Android without root.",
-            )
+            Text("음악을 시작하세요", style = MaterialTheme.typography.headlineMedium)
+            Text("음악 앱을 추가하고 USB로 감상하세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            SectionCard(title = "App container", icon = Icons.Rounded.PhoneAndroid) {
+            Card(Modifier.fillMaxWidth()) {
+              Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val route = OutputRoutePolicy.selected(audio)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (busy) {
-                        CircularProgressIndicator(Modifier.size(22.dp), color = Amber, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    Text(snapshot.detail, style = MaterialTheme.typography.bodyMedium)
+                    Text(route?.name ?: "출력 장치를 선택해 주세요", modifier = Modifier.weight(1f))
+                    TextButton(onClick = onOutput) { Text("출력 설정") }
                 }
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onImport, enabled = snapshot.phase == ContainerPhase.READY, modifier = Modifier.weight(1f)) {
-                        Text("Add app package")
-                    }
-                    OutlinedButton(onClick = onRefresh, enabled = !busy, modifier = Modifier.weight(1f)) {
-                        Text("Refresh")
-                    }
+                Text(if (audio.outputMode == OutputMode.USB) "USB 모드" else "고급 · 공식 비트퍼펙트 모드",
+                    style = MaterialTheme.typography.bodySmall)
+                if (audio.guestConnected) {
+                    Text("입력 ${audio.sourceFormat?.shortLabel() ?: "확인 중"}\n출력 ${audio.sinkFormat?.shortLabel() ?: "준비 중"}")
+                    Text(if (audio.bitPerfectActive) "원본 비트 보존 조건 충족 · 실측 아님"
+                        else "비트퍼펙트 미확인 · 변환 / 볼륨 / 전송 상태를 확인하세요")
                 }
-                OutlinedButton(
-                    onClick = { onRefresh(); chooseInstalled = true },
-                    enabled = snapshot.phase == ContainerPhase.READY,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Add from installed apps") }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Uses Android ${Build.VERSION.RELEASE} on this device. Install only trusted apps: data is stored separately, but this container is not a security sandbox.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Muted,
-                )
+              }
             }
         }
-        snapshot.lastError?.let { error -> item { ErrorCard(error) } }
-        if (snapshot.applications.isEmpty() && !busy) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onImport, enabled = ready) { Text("음악 앱 추가") }
+                TextButton(onClick = ContainerRuntime::refresh, enabled = ready) { Text("새로고침") }
+            }
+            if (!ready) Text(if (apps.phase == ContainerPhase.INSTALLING) "음악 앱을 추가하는 중입니다…" else "음악 공간을 준비하는 중입니다…")
+            apps.lastError?.let { ErrorText(it) }
+            audio.lastError?.let { ErrorText(it) }
+        }
+        if (apps.applications.isEmpty()) item {
+            Section("아직 추가한 음악 앱이 없습니다") {
+                Text("APK / APKS 파일을 선택하거나, 휴대폰에 설치된 음악 앱을 가져오세요. 기존 계정과 앱 데이터는 복사하지 않습니다.")
+            }
+        }
+        items(apps.applications, key = { it.packageName }) { app ->
+            Section(app.name) {
+                Text(if (app.lastStartedPid != null) "시작됨 · 재생 상태는 앱에서 확인" else "실행 준비", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { onLaunch(app.packageName) }, enabled = ready && OutputRoutePolicy.selected(audio) != null && !audio.dsdPlayback.active) { Text("앱 열기") }
+                    TextButton(onClick = { ContainerRuntime.stop(app.packageName) }, enabled = ready) { Text("앱 중지") }
+                }
+            }
+        }
+        item { TextButton(onClick = { showHostApps = !showHostApps }) { Text("휴대폰에 설치된 음악 앱 가져오기") } }
+        if (showHostApps) {
+            if (apps.hostApplications.isEmpty()) item { Text("가져올 음악 앱을 찾지 못했습니다. 파일 추가를 이용해 주세요.") }
+            items(apps.hostApplications, key = { "host-${it.packageName}" }) { app ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(app.name, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { ContainerRuntime.importHostApp(app.packageName) }, enabled = ready) { Text("가져오기") }
+                }
+            }
+        }
+        item {
+            Text("Apple Music · Spotify · YouTube Music 등 다양한 음악 앱을 지원 대상으로 개발하고 있습니다. 앱별 로그인·보호 콘텐츠·재생 호환성은 아직 모두 검증되지 않았습니다.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
+    val context = LocalContext.current
+    val locked = audio.enabled || audio.dsdPlayback.active
+    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Text("오디오 출력", style = MaterialTheme.typography.headlineLarge)
+            Text("출력 경로를 직접 선택합니다. 오류나 분리 시 스피커로 자동 전환하지 않습니다.")
+        }
+        item {
+            Section("재생 모드") {
+                OutputMode.entries.forEach { mode ->
+                    Row(modifier = Modifier.fillMaxWidth().selectable(
+                        selected = audio.outputMode == mode, enabled = !locked, role = Role.RadioButton,
+                        onClick = { AudioPipelineService.selectMode(context, mode) }), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = audio.outputMode == mode, enabled = !locked, onClick = null)
+                        Column {
+                            Text(if (mode == OutputMode.USB) "USB 오디오 · 기본" else "공식 비트퍼펙트 · 고급")
+                            Text(if (mode == OutputMode.USB) "DAC에 직접 전송 · 원본 포맷 우선 협상" else "Android가 제공한 정확한 포맷만 사용",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (locked) Text("모드를 변경하려면 먼저 출력을 중지하세요.")
+            }
+        }
+        if (audio.outputMode == OutputMode.USB) {
             item {
-                SectionCard(title = "Ready for your music apps", icon = Icons.Rounded.LibraryMusic) {
-                    Text(
-                        "Choose an APK, APKS, or compatible XAPK/APKM file. Device-targeted bundletool variants are selected automatically.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Muted,
-                    )
+                Section("USB 음량 ${(audio.usbGain * 100).toInt()}%") {
+                    Slider(value = audio.usbGain, onValueChange = { gain ->
+                        PipelineStore.update { it.copy(usbGain = gain, bitPerfectActive = false) }
+                    })
+                    Text("초기 음량은 25%입니다. Android 시스템 음량과 별도로 적용됩니다. 100% 미만에서는 소프트웨어 음량 조절로 원본 비트가 변경됩니다.", style = MaterialTheme.typography.bodySmall)
                 }
             }
-        }
-        items(snapshot.applications, key = { it.packageName }) { app ->
-            SectionCard(title = app.name, icon = Icons.Rounded.LibraryMusic) {
-                Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = Muted)
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = { onLaunch(app.packageName) },
-                        enabled = snapshot.phase == ContainerPhase.READY,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Rounded.PlayArrow, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Open app")
-                    }
-                    OutlinedButton(onClick = { onStop(app.packageName) }, modifier = Modifier.weight(1f)) {
-                        Text("Stop app")
+            if (usb.devices.isEmpty()) item { Text("USB DAC 또는 USB 이어폰을 연결해 주세요.") }
+            items(usb.devices, key = { "usb-${it.id}" }) { device ->
+                Section(device.name) {
+                    Text(if (device.permission) "USB 접근 허용됨" else "Android USB 접근 권한이 필요합니다")
+                    if (!device.permission) Button(onClick = { UsbHostController.requestPermission(device.id) }) { Text("USB 접근 허용") }
+                    else {
+                        val route = audio.availableRoutes.firstOrNull { it.directUsbDeviceId == device.id }
+                        Button(onClick = { route?.let { AudioPipelineService.command(context, AudioPipelineService.ACTION_SELECT_ROUTE, it.id) } },
+                            enabled = route != null && !audio.dsdPlayback.active) {
+                            Text(if (route?.id == audio.selectedRouteId) "선택됨" else "이 장치로 출력")
+                        }
+                        Text("지원 포맷은 DAC와 협상합니다. 필요한 변환은 실제 출력 정보에 표시됩니다.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ScreenHeader(eyebrow: String, title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(32.dp).background(Amber, RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("V", color = Ink, fontWeight = FontWeight.Black, fontSize = 17.sp)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                eyebrow.uppercase(),
-                color = Amber,
-                style = MaterialTheme.typography.labelMedium,
-                letterSpacing = 1.5.sp,
-            )
-        }
-        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Muted)
-    }
-}
-
-@Composable
-private fun PlayerScreen(
-    snapshot: PipelineSnapshot,
-    selectedDsdName: String?,
-    hasSelectedDsd: Boolean,
-    onChooseDsd: () -> Unit,
-    onPlayDsd: (DsdOutputMode, Boolean) -> Unit,
-    onPauseDsd: () -> Unit,
-    onResumeDsd: () -> Unit,
-    onStopDsd: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onSelectRoute: (OutputRoute?) -> Unit,
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            ScreenHeader(
-                eyebrow = "VirtualDAP",
-                title = "Music audio, intact.",
-                subtitle = "A monitored PCM path from isolated music apps to the output you choose.",
-            )
-        }
-        item { PipelineHero(snapshot, onStart, onStop) }
-        item {
-            DsdFilePlayer(
-                snapshot = snapshot,
-                selectedFileName = selectedDsdName,
-                hasSelectedFile = hasSelectedDsd,
-                onChooseFile = onChooseDsd,
-                onPlay = onPlayDsd,
-                onPause = onPauseDsd,
-                onResume = onResumeDsd,
-                onStop = onStopDsd,
-            )
-        }
-        item { SignalChain(snapshot) }
-        item { StreamDetails(snapshot) }
-        item { OutputSelector(snapshot, onSelectRoute) }
-        item { MetricsRow(snapshot) }
-        snapshot.lastError?.let { error -> item { ErrorCard(error) } }
-    }
-}
-
-@Composable
-private fun PipelineHero(snapshot: PipelineSnapshot, onStart: () -> Unit, onStop: () -> Unit) {
-    val accent = when (snapshot.phase) {
-        PipelinePhase.PLAYING -> Mint
-        PipelinePhase.ERROR -> MaterialTheme.colorScheme.error
-        PipelinePhase.BUFFERING -> Amber
-        else -> Muted
-    }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Panel),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).background(accent, CircleShape))
-                    Spacer(Modifier.width(8.dp))
-                    Text(phaseLabel(snapshot.phase), color = accent, fontWeight = FontWeight.SemiBold)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    when {
-                        snapshot.phase == PipelinePhase.PLAYING -> snapshot.sourceFormat?.shortLabel() ?: "PCM stream"
-                        snapshot.enabled -> "Listening for music app audio"
-                        else -> "Pipeline is off"
-                    },
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    when {
-                        snapshot.guestConnected -> snapshot.guestPeer ?: "Music app connected"
-                        snapshot.enabled -> "Socket @${com.virtualdap.host.bridge.LocalSocketBridgeServer.SOCKET_NAME}"
-                        else -> "Select a supported output, then start the music pipeline."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Muted,
-                )
-            }
-            Button(
-                onClick = if (snapshot.enabled) onStop else onStart,
-                enabled = !snapshot.dsdPlayback.active,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (snapshot.enabled) MaterialTheme.colorScheme.surfaceVariant else Amber,
-                    contentColor = if (snapshot.enabled) MaterialTheme.colorScheme.onSurface else Ink,
-                ),
-                contentPadding = PaddingValues(horizontal = 15.dp, vertical = 11.dp),
-            ) {
-                Icon(
-                    if (snapshot.enabled) Icons.Rounded.Stop else Icons.Rounded.PowerSettingsNew,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(if (snapshot.enabled) "Stop" else "Start")
-            }
-        }
-    }
-}
-
-@Composable
-private fun DsdFilePlayer(
-    snapshot: PipelineSnapshot,
-    selectedFileName: String?,
-    hasSelectedFile: Boolean,
-    onChooseFile: () -> Unit,
-    onPlay: (DsdOutputMode, Boolean) -> Unit,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onStop: () -> Unit,
-) {
-    var selectedModeName by rememberSaveable { mutableStateOf(DsdOutputMode.PCM_CONVERSION.name) }
-    var dopConfirmed by rememberSaveable { mutableStateOf(false) }
-    val selectedMode = DsdOutputMode.valueOf(selectedModeName)
-    val playback = snapshot.dsdPlayback
-    val supportedRouteSelected = snapshot.availableRoutes
-        .firstOrNull { it.id == snapshot.selectedRouteId }
-        ?.officialBitPerfectFormats?.isNotEmpty() == true
-    val controlsLocked = playback.active
-    val routeReady = supportedRouteSelected && selectedMode != DsdOutputMode.NATIVE_DSD
-    val dopReady = selectedMode != DsdOutputMode.DOP || dopConfirmed
-    val canPlay = hasSelectedFile && !controlsLocked && !snapshot.guestConnected && routeReady && dopReady
-
-    SectionCard(title = "Local DSD file", icon = Icons.Rounded.FolderOpen) {
-        Text(
-            "Streams validated DSF or uncompressed DSDIFF. Local-file playback is separate from Apple Music, Spotify and other app audio.",
-            style = MaterialTheme.typography.bodySmall,
-            color = Muted,
-        )
-        Spacer(Modifier.height(12.dp))
-        Surface(
-            color = Color.White.copy(alpha = 0.04f),
-            shape = RoundedCornerShape(14.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.LibraryMusic, contentDescription = null, tint = Amber)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        playback.fileName.takeIf { playback.active } ?: selectedFileName ?: "No DSD file selected",
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text("Content signature is checked before output starts", style = MaterialTheme.typography.bodySmall, color = Muted)
-                }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        OutlinedButton(onClick = onChooseFile, enabled = !controlsLocked, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Rounded.FolderOpen, contentDescription = null, Modifier.size(18.dp))
-            Spacer(Modifier.width(7.dp))
-            Text(if (hasSelectedFile) "Choose another file" else "Choose DSF / DSDIFF")
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Text("OUTPUT MODE", style = MaterialTheme.typography.labelSmall, color = Muted, letterSpacing = 1.sp)
-        Spacer(Modifier.height(7.dp))
-        DsdModeOption(
-            selected = selectedMode == DsdOutputMode.PCM_CONVERSION,
-            enabled = !controlsLocked,
-            title = "DSD → PCM",
-            detail = "Explicit DSD conversion at a fixed 8:1 rate; requires a matching bit-perfect PCM output",
-            onClick = { selectedModeName = DsdOutputMode.PCM_CONVERSION.name },
-        )
-        DsdModeOption(
-            selected = selectedMode == DsdOutputMode.DOP,
-            enabled = !controlsLocked,
-            title = "DoP 1.1",
-            detail = "Exact 24-bit carrier through Android official bit-perfect output",
-            onClick = { selectedModeName = DsdOutputMode.DOP.name },
-        )
-
-        if (selectedMode == DsdOutputMode.DOP) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = dopConfirmed,
-                    onCheckedChange = { dopConfirmed = it },
-                    enabled = !controlsLocked,
-                )
-                Text(
-                    "I verified that this DAC supports DoP at the required carrier rate.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Muted,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        if (!routeReady) {
-            Text(
-                "Select a device with official bit-perfect support. Unsupported formats will stop playback.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Amber,
-            )
-        }
-        if (snapshot.guestConnected) {
-            Text(
-                "Stop the currently connected music app before starting a local DSD file.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Amber,
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-        if (!playback.active) {
-            Button(
-                onClick = { onPlay(selectedMode, dopConfirmed) },
-                enabled = canPlay,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(7.dp))
-                Text("Play DSD file")
-            }
+            usb.error?.let { message -> item { ErrorText(message) } }
         } else {
-            LinearProgressIndicator(
-                progress = { playback.progress },
-                modifier = Modifier.fillMaxWidth(),
-                color = Amber,
-                trackColor = Color.White.copy(alpha = 0.08f),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = if (playback.phase == DsdPlaybackPhase.PAUSED) onResume else onPause,
-                    enabled = playback.phase == DsdPlaybackPhase.PLAYING || playback.phase == DsdPlaybackPhase.PAUSED,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(
-                        if (playback.phase == DsdPlaybackPhase.PAUSED) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (playback.phase == DsdPlaybackPhase.PAUSED) "Resume" else "Pause")
-                }
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Stop")
-                }
-            }
-        }
-
-        if (playback.format != null) {
-            Spacer(Modifier.height(13.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-            Spacer(Modifier.height(8.dp))
-            DiagnosticLine("State", dsdPhaseLabel(playback.phase))
-            DiagnosticLine("Source", playback.format.shortLabel())
-            DiagnosticLine("Position", "${durationLabel(sampleDurationMillis(playback.samplePosition, playback.format.sampleRate))} / ${durationLabel(playback.durationMillis)}")
-            DiagnosticLine("Mode", dsdModeLabel(playback.mode))
-            playback.outputFormat?.let { DiagnosticLine("PCM output", it.shortLabel()) }
-            playback.transportRate?.let { DiagnosticLine("DoP carrier", "${it / 1_000.0} kHz") }
-            playback.outputRoute?.let { DiagnosticLine("Routed output", it.name) }
-            playback.qualification?.let { DiagnosticLine("Qualification", it) }
-            if (playback.mode != DsdOutputMode.PCM_CONVERSION) {
-                DiagnosticLine("Source preserved", if (playback.sourcePreserved) "Official bit-perfect route active" else "Not yet verified")
-            }
-        }
-        playback.lastError?.let { error ->
-            Spacer(Modifier.height(10.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun DsdModeOption(
-    selected: Boolean,
-    enabled: Boolean,
-    title: String,
-    detail: String,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        color = if (selected) Amber.copy(alpha = 0.11f) else Color.Transparent,
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = selected, onClick = null, enabled = enabled)
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = Muted)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SignalChain(snapshot: PipelineSnapshot) {
-    SectionCard(title = "Signal path", icon = Icons.Rounded.GraphicEq) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SignalNode(
-                Modifier.weight(1f),
-                label = "GUEST",
-                value = if (snapshot.guestConnected) "Online" else "Waiting",
-                active = snapshot.guestConnected,
-            )
-            SignalConnector(snapshot.guestConnected)
-            SignalNode(
-                Modifier.weight(1f),
-                label = "BRIDGE",
-                value = snapshot.sourceFormat?.let { "${it.sampleRate / 1000.0} kHz" } ?: "PCM",
-                active = snapshot.phase == PipelinePhase.BUFFERING || snapshot.phase == PipelinePhase.PLAYING,
-            )
-            SignalConnector(snapshot.phase == PipelinePhase.PLAYING)
-            SignalNode(
-                Modifier.weight(1f),
-                label = "OUTPUT",
-                value = snapshot.activeRoute?.name ?: "Not selected",
-                active = snapshot.sinkFormat != null,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SignalNode(modifier: Modifier, label: String, value: String, active: Boolean) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(42.dp)
-                .background(if (active) Amber.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(9.dp).background(if (active) Amber else Muted.copy(alpha = 0.4f), CircleShape))
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Muted, letterSpacing = 1.sp)
-        Text(value, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun SignalConnector(active: Boolean) {
-    Box(
-        Modifier.width(26.dp).height(1.dp)
-            .background(if (active) Amber else Color.White.copy(alpha = 0.09f)),
-    )
-}
-
-@Composable
-private fun StreamDetails(snapshot: PipelineSnapshot) {
-    SectionCard(title = "Current stream", icon = Icons.Rounded.Memory) {
-        val format = snapshot.sourceFormat
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            DetailValue("SAMPLE RATE", format?.let { "${it.sampleRate / 1000.0} kHz" } ?: "—")
-            DetailValue("BIT DEPTH", format?.encoding?.displayName ?: "—")
-            DetailValue("CHANNELS", format?.channelCount?.toString() ?: "—")
-        }
-        Spacer(Modifier.height(16.dp))
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-        Spacer(Modifier.height(13.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                if (snapshot.directPlayback) Icons.Rounded.GraphicEq else Icons.Rounded.Info,
-                contentDescription = null,
-                tint = if (snapshot.directPlayback) Mint else Amber,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                when {
-                    snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
-                    snapshot.bitPerfectActive -> "Unchanged PCM with Android's official bit-perfect mixer active on the selected output."
-                    else -> "Waiting for official bit-perfect route confirmation. Unsupported output stops playback."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = Muted,
-            )
-        }
-        if (snapshot.sinkFormat != null) {
-            Spacer(Modifier.height(10.dp))
-            DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
-            DiagnosticLine("Application gain", "${(snapshot.applicationGainLeft * 100).toInt()}% / ${(snapshot.applicationGainRight * 100).toInt()}%")
-            DiagnosticLine("Music tracks", "${snapshot.playingStreams} playing / ${snapshot.connectedStreams} connected")
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRoute?) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    val enabled = !snapshot.dsdPlayback.active
-    SectionCard(title = "Output device", icon = Icons.Rounded.Usb) {
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { if (enabled) expanded = !expanded },
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth()
-                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled),
-                onClick = { if (enabled) expanded = true },
-                color = Color.White.copy(alpha = 0.04f),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (snapshot.activeRoute?.isUsb == true) Icons.Rounded.Usb else Icons.Rounded.Speaker,
-                        contentDescription = null,
-                        tint = Amber,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            snapshot.availableRoutes.firstOrNull { it.id == snapshot.selectedRouteId }?.name
-                                ?: "No output selected",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            if (enabled) "Tap to choose a route" else "Stop DSD playback before changing output",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Muted,
-                        )
-                    }
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-                }
-            }
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("No output selected") },
-                    onClick = { expanded = false; onSelectRoute(null) },
-                )
-                snapshot.availableRoutes.forEach { route ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(route.name)
-                                Text(
-                                    if (route.officialBitPerfectFormats.isNotEmpty()) "Official bit-perfect · ${route.officialBitPerfectFormats.size} formats"
-                                    else "Unsupported: device exposes no official bit-perfect format",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Muted,
-                                )
-                            }
-                        },
-                        enabled = route.officialBitPerfectFormats.isNotEmpty(),
-                        onClick = { expanded = false; onSelectRoute(route) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetricsRow(snapshot: PipelineSnapshot) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        MetricCard(Modifier.weight(1f), "RECEIVED", humanBytes(snapshot.bytesReceived))
-        MetricCard(Modifier.weight(1f), "TRACK QUEUE", snapshot.latencyMs?.let { "%.1f ms".format(it) } ?: "—")
-        MetricCard(Modifier.weight(1f), "DROPPED", humanBytes(snapshot.guestDroppedBytes))
-    }
-}
-
-@Composable
-private fun MetricCard(modifier: Modifier, label: String, value: String) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(13.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = Muted)
-            Spacer(Modifier.height(5.dp))
-            Text(value, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        }
-    }
-}
-
-@Composable
-private fun AppsScreen() {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            ScreenHeader(
-                eyebrow = "Compatibility",
-                title = "One PCM path.",
-                subtitle = "Target services for the music space. Catalog entries are not verified compatibility results.",
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-        items(MusicAppCatalog.popularApps, key = { it.packageName }) { app ->
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-                Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(42.dp).background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(13.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(app.name.take(1), color = Amber, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(app.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            CompatibilityBadge(app.audioPath)
-                        }
-                        Text(app.note, style = MaterialTheme.typography.bodySmall, color = Muted)
+            items(audio.availableRoutes.filter { it.directUsbDeviceId == null }, key = { it.id }) { route ->
+                Section("${route.name} · ${routeKind(route)}") {
+                    Text(OutputSupportPresentation.officialStatus(route))
+                    Button(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_SELECT_ROUTE, route.id) },
+                        enabled = OutputRoutePolicy.eligible(route, audio.outputMode) && !audio.dsdPlayback.active) {
+                        Text(if (audio.selectedRouteId == route.id) "선택됨" else "선택")
                     }
                 }
             }
         }
         item {
-            Text(
-                "The container shares the host Android version. Service login, Play Integrity and Widevine remain provider-controlled. VirtualDAP does not bypass DRM.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Muted,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP) }, enabled = locked) { Text("출력 중지") }
+                TextButton(onClick = { UsbHostController.refresh() }) { Text("장치 새로고침") }
+            }
+            audio.lastError?.let { ErrorText(it) }
         }
     }
 }
 
 @Composable
-private fun CompatibilityBadge(path: AppAudioPath) {
-    val (text, color) = when (path) {
-        AppAudioPath.SYSTEM_PCM -> "PCM" to Mint
-        AppAudioPath.SYSTEM_PCM_WITH_DRM_REQUIREMENTS -> "PCM · DRM" to Amber
-        AppAudioPath.LOCAL_HI_RES_PCM -> "HI-RES" to Mint
-    }
-    Text(
-        text,
-        color = color,
-        style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier.background(color.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    )
-}
-
-@Composable
-private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit) {
-    val locale = LocalLocale.current.platformLocale
-    val timeFormatter = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            ScreenHeader(
-                eyebrow = "Diagnostics",
-                title = "See every handoff.",
-                subtitle = "Verify routing before involving a guest music service.",
-            )
-        }
-        item {
-            SectionCard(title = "Official bit-perfect support", icon = Icons.Rounded.Usb) {
-                if (snapshot.availableRoutes.isEmpty()) Text("No audio outputs detected.", color = Muted)
-                snapshot.availableRoutes.forEach { route ->
-                    Text(route.name, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (route.officialBitPerfectFormats.isEmpty()) "Unsupported on this device"
-                        else route.officialBitPerfectFormats.joinToString("\n") { it.shortLabel() },
-                        style = MaterialTheme.typography.bodySmall, color = Muted,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                }
-                Text("Android 14 or later is required. Support also depends on the device, DAC and exact format.",
-                    style = MaterialTheme.typography.bodySmall, color = Muted)
-            }
-        }
-        item {
-            SectionCard(title = "Output self-test", icon = Icons.Rounded.PlayArrow) {
-                Text(
-                    "Plays a quiet two-second 440 Hz tone at 48 kHz / 16-bit stereo. This tests only the host output route.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Muted,
-                )
-                Spacer(Modifier.height(13.dp))
-                Button(onClick = onSelfTest, enabled = !snapshot.guestConnected) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(7.dp))
-                    Text("Run output test")
-                }
-            }
-        }
-        item {
-            SectionCard(title = "Session", icon = Icons.Rounded.Info) {
-                DiagnosticLine("Bridge", if (snapshot.enabled) "Listening" else "Stopped")
-                DiagnosticLine("Container", if (snapshot.guestConnected) snapshot.guestPeer ?: "Connected" else "Not connected")
-                DiagnosticLine("Reconnects", snapshot.reconnectCount.toString())
-                DiagnosticLine("Frames", snapshot.framesReceived.toString())
-            }
-        }
-        item {
-            SectionCard(title = "Event log", icon = Icons.AutoMirrored.Rounded.List) {
-                if (snapshot.logs.isEmpty()) {
-                    Text("No events yet.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                } else {
-                    snapshot.logs.asReversed().forEachIndexed { index, entry ->
-                        if (index > 0) HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
-                        Row(Modifier.padding(vertical = 8.dp)) {
-                            Text(
-                                timeFormatter.format(Date(entry.timestampMillis)),
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Muted,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                entry.message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = when (entry.level) {
-                                    LogLevel.INFO -> MaterialTheme.colorScheme.onSurface
-                                    LogLevel.WARNING -> Amber
-                                    LogLevel.ERROR -> MaterialTheme.colorScheme.error
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionCard(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.padding(17.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = Amber, modifier = Modifier.size(19.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(15.dp))
+private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
             content()
         }
     }
 }
-
-@Composable
-private fun DetailValue(label: String, value: String) {
-    Column {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Muted)
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    }
+@Composable private fun ErrorText(message: String) {
+    Text("작업을 완료하지 못했습니다.\n$message", color = MaterialTheme.colorScheme.error)
 }
-
-@Composable
-private fun DiagnosticLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(label, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-    }
+private fun routeKind(route: OutputRoute): String = when (route.type) {
+    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "내장 스피커"
+    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "수화부"
+    AudioDeviceInfo.TYPE_USB_DEVICE -> "USB 오디오"
+    AudioDeviceInfo.TYPE_USB_HEADSET -> "USB 헤드셋"
+    else -> "출력 유형 ${route.type}"
 }
-
-@Composable
-private fun ErrorCard(message: String) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-            Spacer(Modifier.width(10.dp))
-            Text(message, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-private fun phaseLabel(phase: PipelinePhase): String = when (phase) {
-    PipelinePhase.STOPPED -> "Stopped"
-    PipelinePhase.WAITING_FOR_GUEST -> "Ready for music"
-    PipelinePhase.BUFFERING -> "Buffering"
-    PipelinePhase.PLAYING -> "Playing"
-    PipelinePhase.PAUSED -> "Paused"
-    PipelinePhase.ERROR -> "Needs attention"
-}
-
-private fun dsdPhaseLabel(phase: DsdPlaybackPhase): String = when (phase) {
-    DsdPlaybackPhase.IDLE -> "Stopped"
-    DsdPlaybackPhase.PREPARING -> "Preparing"
-    DsdPlaybackPhase.PLAYING -> "Playing"
-    DsdPlaybackPhase.PAUSED -> "Paused"
-    DsdPlaybackPhase.STOPPING -> "Stopping"
-    DsdPlaybackPhase.COMPLETED -> "Completed"
-    DsdPlaybackPhase.ERROR -> "Needs attention"
-}
-
-private fun dsdModeLabel(mode: DsdOutputMode): String = when (mode) {
-    DsdOutputMode.PCM_CONVERSION -> "DSD → PCM"
-    DsdOutputMode.NATIVE_DSD -> "Native DSD"
-    DsdOutputMode.DOP -> "DoP 1.1"
-}
-
-private fun durationLabel(milliseconds: Long): String {
-    val seconds = milliseconds.coerceAtLeast(0L) / 1_000L
-    return "%d:%02d".format(seconds / 60L, seconds % 60L)
-}
-
-private fun sampleDurationMillis(samples: Long, sampleRate: Int): Long =
-    samples / sampleRate * 1_000L + samples % sampleRate * 1_000L / sampleRate
-
-private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching {
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
-    }
-}.getOrNull()
-
-private fun humanBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
-    bytes >= 1024L * 1024L -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
-    bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
+private fun dsdModeName(mode: DsdOutputMode) = when (mode) {
+    DsdOutputMode.PCM_CONVERSION -> "PCM으로 변환"
+    DsdOutputMode.DOP -> "DoP 전송"
+    DsdOutputMode.NATIVE_DSD -> "네이티브 DSD · 검증된 장치만"
 }

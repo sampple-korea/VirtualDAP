@@ -7,6 +7,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val prepareUsbNotices = tasks.register<Sync>("prepareUsbNotices") {
+    from(rootProject.file("third_party/libusb/COPYING")) { rename { "libusb-LICENSE.txt" } }
+    into(layout.buildDirectory.dir("generated/usbNotices/notices"))
+}
+
 private fun testProtoBytes(vararg parts: ByteArray): ByteArray = ByteArrayOutputStream().use { output ->
     parts.forEach(output::writeBytes)
     output.toByteArray()
@@ -115,6 +120,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        externalNativeBuild.cmake.arguments += "-DVIRTUALDAP_BUILD_DIRECT_USB=ON"
     }
 
     buildTypes {
@@ -136,12 +142,13 @@ android {
             version = "3.22.1"
         }
     }
-    // Retained direct-USB sources are compiled only by JVM regression tests, never into the APK.
-    sourceSets.getByName("test").kotlin.directories.add(rootProject.file("compatibility/direct_usb/kotlin").path)
+    // Direct USB is the default output transport; the official Android route is explicitly selected.
+    sourceSets.getByName("main").kotlin.directories.add(rootProject.file("compatibility/direct_usb/kotlin").path)
     sourceSets.getByName("androidTest").assets.directories.add(
         layout.buildDirectory.dir("generated/musicFixtureAssets").get().asFile.path,
     )
     sourceSets.getByName("main").assets.directories.add(rootProject.file("third_party/notices").path)
+    sourceSets.getByName("main").assets.directories.add(layout.buildDirectory.dir("generated/usbNotices").get().asFile.path)
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -152,6 +159,8 @@ android {
         disable += "OldTargetApi"
     }
 }
+
+tasks.named("preBuild") { dependsOn(prepareUsbNotices) }
 
 tasks.configureEach {
     if (name == "mergeDebugAndroidTestAssets" ||

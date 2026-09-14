@@ -3,7 +3,7 @@ package com.virtualdap.host.service
 import android.content.Context
 import android.net.Credentials
 import android.os.SystemClock
-import com.virtualdap.host.audio.AndroidAudioSink
+import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.*
 import com.virtualdap.host.model.*
@@ -58,12 +58,14 @@ class AudioSessionMixer(
         PipelineStore.update { current ->
             if (selected == null) PipelinePresentation.withoutStreams(current, lastOutputError)
             else selected.copy(
+                outputMode = current.outputMode, usbGain = current.usbGain,
                 enabled = current.enabled, availableRoutes = current.availableRoutes,
                 selectedRouteId = current.selectedRouteId, logs = current.logs,
                 lastError = lastOutputError ?: selected.lastError,
                 phase = if (active.isEmpty() && lastOutputError != null) PipelinePhase.ERROR else selected.phase,
                 connectedStreams = sessions.size, playingStreams = active.size,
-                bitPerfectActive = active.size == 1 && selected.bitPerfectActive,
+                bitPerfectActive = active.size == 1 && selected.bitPerfectActive &&
+                    (current.outputMode != OutputMode.USB || current.usbGain == 1f),
                 guestDroppedBytes = sessions.values.sumOf { it.state.guestDroppedBytes },
                 reconnectCount = sessions.values.sumOf { it.state.reconnectCount },
             )
@@ -78,7 +80,7 @@ class AudioSessionMixer(
     }
 
     private inner class Session(private val id: Long) : BridgeEvents {
-        val sink = AndroidAudioSink(context)
+        val sink = RoutedAudioSink(context)
         private val operations = Any()
         private val stateRef = AtomicReference(PipelineSnapshot())
         var state: PipelineSnapshot
@@ -102,6 +104,7 @@ class AudioSessionMixer(
             check(!closed.get() && !disposed) { "Audio pipeline is closed" }
             controlled = handshake.version == BridgeWireProtocol.CONTROLLED_VERSION
             active = !controlled
+            sink.selectRoute(selectedRoute)
             sink.setPlaying(active)
             state = PipelineSnapshot(
                 guestConnected = true, guestPeer = "pid ${peer.pid} · stream $id",
@@ -141,7 +144,7 @@ class AudioSessionMixer(
                 bitPerfectActive = false, lastError = null,
             ) }
             PipelineStore.log("Stream $id output: ${result.configured.shortLabel()}" +
-                " · official bit-perfect PCM")
+                if (result.route?.directUsbDeviceId != null) " · 직접 USB PCM" else " · 공식 비트퍼펙트 PCM")
         }
 
         override fun onFormatChanged(format: PcmFormat, streamEpoch: Long) = synchronized(operations) {
@@ -167,6 +170,8 @@ class AudioSessionMixer(
                 framesReceived = it.framesReceived + count / source.frameSizeBytes,
                 latencyMs = sink.queuedDurationMs(), activeRoute = route ?: it.activeRoute,
                 bitPerfectActive = bitPerfect,
+                outputUnderruns = sink.usbStatistics()?.underruns ?: 0,
+                outputFramesCompleted = sink.usbStatistics()?.completedFrames,
             ) }
         }
 

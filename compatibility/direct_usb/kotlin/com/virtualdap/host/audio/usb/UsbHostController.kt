@@ -37,13 +37,19 @@ object UsbHostController {
     private val directLease = AtomicBoolean(false)
 
     private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) { refresh() }
+        override fun onReceive(context: Context, intent: Intent) {
+            refresh()
+            if (intent.action == permissionAction(context)) {
+                manager?.deviceList?.values?.filter { manager?.hasPermission(it) == true }
+                    ?.forEach { inspect(it.deviceId) }
+            }
+        }
     }
 
     @Synchronized fun initialize(context: Context) {
         if (this.context != null) return
         this.context = context.applicationContext
-        manager = context.getSystemService(UsbManager::class.java)
+        manager = context.applicationContext.getSystemService(UsbManager::class.java)
         val filter = IntentFilter(permissionAction(context)).apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)

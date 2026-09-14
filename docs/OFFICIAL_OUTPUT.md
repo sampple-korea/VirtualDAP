@@ -1,5 +1,8 @@
 # Official bit-perfect output
 
+This is the explicitly selected advanced mode. Default playback uses the independent
+[USB output path](USB_OUTPUT.md); no transport switches automatically on failure.
+
 Android 14 / API 34 is the minimum supported system version. Capability is discovered per output
 with `AudioManager.getSupportedMixerAttributes`. Only entries with
 `AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT` are eligible.

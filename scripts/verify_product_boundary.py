@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that the built product APK excludes dormant direct-output and full-OS code."""
+"""Verify both selected output transports and absence of retired full-OS/authentication code."""
 import pathlib
 import sys
 import zipfile
@@ -7,13 +7,11 @@ import zipfile
 apk = pathlib.Path(sys.argv[1])
 with zipfile.ZipFile(apk) as archive:
     names = archive.namelist()
-    forbidden_libs = ("libvirtualdap_usb.so", "libusb-1.0.so")
-    assert not any(name.endswith(forbidden_libs) for name in names), "Direct USB library packaged"
+    assert "assets/notices/libusb-LICENSE.txt" in names, "Missing dynamically linked USB library license"
+    for abi in ("arm64-v8a", "armeabi-v7a", "x86", "x86_64"):
+        for library in ("libvirtualdap_usb.so", "libusb-1.0.so"):
+            assert f"lib/{abi}/{library}" in names, f"Missing USB transport: {abi}/{library}"
     forbidden_types = (
-        b"Lcom/virtualdap/host/audio/usb/",
-        b"Lcom/virtualdap/host/audio/RoutedAudioSink;",
-        b"Lcom/virtualdap/host/audio/NativeDsdEncoder;",
-        b"Lcom/virtualdap/host/audio/OutputFormatPlanner;",
         b"Lcom/virtualdap/host/guest/",
         b"Lcom/virtualdap/host/bridge/SharedRingBufferReader;",
         b"Lcom/virtualdap/host/bridge/RingBufferLayout;",
@@ -27,4 +25,4 @@ with zipfile.ZipFile(apk) as archive:
             dex = archive.read(name)
             for token in forbidden_types:
                 assert token not in dex, f"Dormant code packaged in {name}: {token!r}"
-print("APK boundary: official-output product; direct USB and full-OS code absent")
+print("APK boundary: direct USB packaged for all ABIs; retired full-OS/authentication code absent")

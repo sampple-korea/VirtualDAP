@@ -118,7 +118,7 @@ class ContainerInstrumentedTest {
             await("unsupported output prerequisite") {
                 ContainerRuntime.state.value.detail == "Audio output not ready"
             }
-            assertTrue(ContainerRuntime.state.value.lastError.orEmpty().contains("official bit-perfect"))
+            assertTrue(ContainerRuntime.state.value.lastError.orEmpty().contains("USB DAC"))
             assertEquals(null, ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid)
             capture.start()
             ContainerRuntime.launch(FIXTURE)

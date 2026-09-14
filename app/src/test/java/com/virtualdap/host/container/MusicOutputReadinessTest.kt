@@ -14,12 +14,12 @@ import org.junit.Test
 class MusicOutputReadinessTest {
     private val route = OutputRoute(7, "Official DAC", 11, true, listOf(48_000), emptyList(),
         officialBitPerfectFormats = listOf(PcmFormat(48_000, 2, PcmEncoding.PCM_16)))
-    private val preparing = PipelineSnapshot(selectedRouteId = route.id, availableRoutes = listOf(route))
+    private val preparing = PipelineSnapshot(outputMode = OutputMode.OFFICIAL_BIT_PERFECT, selectedRouteId = route.id, availableRoutes = listOf(route))
 
     @Test fun missingSelectionIsAnOutputFailureWithoutWaiting() = runTest {
         val failure = runCatching { MusicOutputReadiness.await(MutableStateFlow(PipelineSnapshot())) }.exceptionOrNull()
         assertTrue(failure is MusicOutputUnavailable)
-        assertTrue(failure!!.message!!.contains("official bit-perfect"))
+        assertTrue(failure!!.message!!.contains("USB DAC"))
         assertEquals(0L, testScheduler.currentTime)
     }
 

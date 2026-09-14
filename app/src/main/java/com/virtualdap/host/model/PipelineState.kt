@@ -14,6 +14,7 @@ enum class PipelinePhase {
 }
 
 enum class LogLevel { INFO, WARNING, ERROR }
+enum class OutputMode { USB, OFFICIAL_BIT_PERFECT }
 
 enum class DsdPlaybackPhase {
     IDLE,
@@ -40,6 +41,8 @@ data class OutputRoute(
     val encodings: List<Int>,
     val directUsbDeviceId: Int? = null,
     val officialBitPerfectFormats: List<PcmFormat> = emptyList(),
+    val officialQueryFailure: String? = null,
+    val officialBitPerfectReported: Boolean = false,
 )
 
 data class DsdPlaybackSnapshot(
@@ -69,6 +72,8 @@ data class DsdPlaybackSnapshot(
 }
 
 data class PipelineSnapshot(
+    val outputMode: OutputMode = OutputMode.USB,
+    val usbGain: Float = 0.25f,
     val enabled: Boolean = false,
     val phase: PipelinePhase = PipelinePhase.STOPPED,
     val guestConnected: Boolean = false,

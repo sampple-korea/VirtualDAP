@@ -1,6 +1,8 @@
 package com.virtualdap.host.container
 
 import com.virtualdap.host.model.PipelineSnapshot
+import com.virtualdap.host.model.OutputMode
+import com.virtualdap.host.model.OutputRoutePolicy
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -28,9 +30,9 @@ internal object MusicOutputReadiness {
         state.dsdPlayback.active -> "Stop local DSD playback before starting a music app."
         // A running bridge has already validated its output (instrumentation uses a test receiver).
         state.enabled -> null
-        state.availableRoutes.none {
-            it.id == state.selectedRouteId && it.officialBitPerfectFormats.isNotEmpty()
-        } -> "Select an output supported by Android's official bit-perfect path before starting a music app."
+        OutputRoutePolicy.selected(state) == null -> if (state.outputMode == OutputMode.USB)
+            "USB DAC를 연결하고 접근을 허용한 뒤 출력 장치를 선택해 주세요."
+        else "Select an output supported by Android's official bit-perfect path before starting a music app."
         else -> null
     }
 }

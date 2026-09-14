@@ -10,7 +10,7 @@ hosted AudioTrack.write → bounded streaming queue / static buffer iterator →
 hosted AAudio callback  → preallocated callback buffer ────────────────────┤
 hosted AAudio write     → timeout-aware bounded streaming queue ───────────┤
 hosted OpenSL ES queue  → copied, count-bounded native buffer queue ───────┘
-                         → host AudioPipelineService → official bit-perfect AudioTrack → selected output
+                         → host AudioPipelineService → selected USB transport or advanced official AudioTrack
 ```
 
 An intercepted AudioTrack's original native output is not started or written, so playback is not
@@ -119,10 +119,10 @@ Output readiness failures are reported separately from hosted application startu
 This does not establish all music-service compatibility. Still required are AudioTrack/OpenSL ES
 playback-speed and effect semantics, app-specific decoder/DRM/login tests and wider Android API/ABI
 runtime coverage.
-Direct USB PCM/native DSD implementations are retained for future compatibility development;
-see [retained USB implementation](USB_OUTPUT.md). They are excluded from the current APK.
-Streaming apps remain PCM sources. Local-file DoP and explicit DSD-to-PCM conversion both use the
-official bit-perfect output path.
+Direct USB PCM/native DSD implementations now serve the default USB output mode;
+see [USB implementation](USB_OUTPUT.md). The advanced official mode remains separately selected.
+Streaming apps remain PCM sources. Local-file DoP and explicit DSD-to-PCM conversion use the
+selected USB or advanced official path; only USB offers qualified native DSD.
 
 API signatures are checked against
 [AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java),

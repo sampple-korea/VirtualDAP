@@ -1,7 +1,10 @@
 # VirtualDAP
 
 VirtualDAP runs music apps in an ordinary-UID app container and carries their decoded PCM to a
-selected Android official bit-perfect output. Minimum Android version: **14 / API 34**.
+selected USB DAC output. Minimum Android version: **14 / API 34**. The Korean interface opens on
+music apps; diagnostics, output tone and local DSD live in the compact Tools menu.
+The latest user decisions and remaining completion evidence are recorded in
+[product requirements](docs/PRODUCT_REQUIREMENTS.md).
 
 The container shares the device's Android framework. It supports APK and compatible split-package
 imports, separate app data, app launch/stop, and Java AudioTrack, native AAudio and OpenSL ES PCM
@@ -11,21 +14,28 @@ for every commercial service. Provider login, subscriptions, DRM and attestation
 
 ## Output
 
-Only a device advertising the exact input format with Android's official bit-perfect mixer behavior
-can play. The user selects that output explicitly. Unsupported device, DAC, sample rate, channel
-layout or PCM encoding produces an error. There is no automatic output conversion, ordinary-mixer
-fallback or direct-USB fallback.
+**USB audio is the default mode.** After the user grants Android USB access and selects a DAC,
+the native transport negotiates USB Audio Class formats and sends audio directly. Exact source
+formats are preferred; necessary rate/channel/encoding conversion is reflected in output status.
+USB software volume initially starts at 25%; non-unity gain is not bit-perfect. This is not a
+guarantee that every phone/DAC works. FreeDSP on SM-S938N is a user-reported official-path limitation,
+not yet a verified direct-USB playback result.
 
-One active output stream and unity application gain are required. Crossfade/overlap and non-unity
-application volume are rejected. Route changes or lost mixer preferences stop submission.
+**Official bit-perfect is an advanced mode.** Only a device advertising the exact input format
+with Android's official bit-perfect mixer behavior can play in this mode. Unsupported formats
+are rejected; there is no output conversion. Neither mode automatically falls back to the other
+or to the ordinary Android mixer/speaker.
+
+One active output stream is required. Official mode also requires unity application gain.
+Crossfade/overlap is currently rejected. Device loss stops playback without speaker fallback.
 
 Local DSF and uncompressed DSDIFF playback supports explicitly selected DSD-to-PCM conversion and
-confirmed DoP. Both use the same official output contract. See [official output](docs/OFFICIAL_OUTPUT.md)
+confirmed DoP and qualified native DSD over USB. Official mode supports exact PCM and DoP only.
+See [official output](docs/OFFICIAL_OUTPUT.md)
 and [DSD pipeline](docs/DSD_PIPELINE.md).
 
-The direct USB implementation and its tests are retained for future compatibility development.
-Its Kotlin sources are compiled only into JVM tests, and its native library is excluded from the
-product build. See [compatibility source](compatibility/direct_usb/README.md). No separate Android OS
+The direct USB implementation is included in the product, along with its existing regression tests.
+See [USB source](compatibility/direct_usb/README.md). No separate Android OS
 boot, guest image importer, privileged VM provider or emulated guest display is included.
 
 ## Build and verify
@@ -46,7 +56,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
 Instrumentation separates real container capture (using a paced, test-only socket receiver) from
 official-output rejection tests. The receiver emits no sound and is not hardware playback evidence.
-The Diagnostics tone uses the same official output restrictions as music playback.
+The Tools tone uses the selected output mode and does not certify the music-app capture path.
 Physical DAC validation is outside the current test scope.
 
 A downloadable signed APK will be published through GitHub Releases once the usable scope is

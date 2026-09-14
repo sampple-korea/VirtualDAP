@@ -10,6 +10,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.virtualdap.host.audio.DsdOutputMode
 import com.virtualdap.host.model.DsdPlaybackPhase
+import com.virtualdap.host.model.OutputMode
+import com.virtualdap.host.model.PipelineSnapshot
 import com.virtualdap.host.service.AudioPipelineService
 import com.virtualdap.host.service.PipelineStore
 import java.io.ByteArrayOutputStream
@@ -33,6 +35,7 @@ class DsdPlaybackInstrumentedTest {
     }
 
     @Test fun pcmConversionWithoutAnOfficialOutputReportsUnsupported() {
+        PipelineStore.update { PipelineSnapshot(outputMode = OutputMode.OFFICIAL_BIT_PERFECT) }
         val sourceBytesPerChannel = 22_050
         val uri = publish("virtualdap-service-fixture.dsf", dsf(sourceBytesPerChannel))
 
@@ -52,10 +55,11 @@ class DsdPlaybackInstrumentedTest {
         assertEquals("service fixture.dsf", result.fileName)
         assertEquals(DsdOutputMode.PCM_CONVERSION, result.mode)
         assertNull(result.outputFormat)
-        assertTrue(result.lastError.orEmpty().contains("official bit-perfect"))
+        assertTrue(result.lastError.orEmpty().contains("출력 장치"))
     }
 
     @Test fun nativeModeWithoutAnExclusiveUsbRouteFailsInsteadOfFallingBackToPcm() {
+        PipelineStore.update { PipelineSnapshot(outputMode = OutputMode.USB) }
         val uri = publish("virtualdap-native-guard.dsf", dsf(64))
 
         val fileName = "virtualdap-native-guard.dsf"
@@ -68,7 +72,7 @@ class DsdPlaybackInstrumentedTest {
         )
 
         val result = awaitState { it.fileName == fileName && it.phase == DsdPlaybackPhase.ERROR }
-        assertTrue(result.lastError.orEmpty().contains("official bit-perfect"))
+        assertTrue(result.lastError.orEmpty().contains("출력 장치"))
         assertEquals(DsdOutputMode.NATIVE_DSD, result.mode)
         assertNull(result.outputFormat)
     }

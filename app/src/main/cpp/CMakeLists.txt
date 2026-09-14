@@ -24,7 +24,7 @@ if(ANDROID)
     target_link_libraries(virtualdap_dsp PRIVATE dsd2pcm SampleRate::samplerate)
     target_compile_options(virtualdap_dsp PRIVATE -Wall -Wextra -Werror)
     target_link_options(virtualdap_dsp PRIVATE "-Wl,-z,max-page-size=16384")
-    # Dormant native compatibility implementation; not linked or packaged in the product.
+    # Direct USB transport, enabled by the app's Android build configuration.
     if(VIRTUALDAP_BUILD_DIRECT_USB)
     add_library(usb-1.0 SHARED
         "${LIBUSB_ROOT}/libusb/core.c" "${LIBUSB_ROOT}/libusb/descriptor.c"
