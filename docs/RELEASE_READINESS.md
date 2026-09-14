@@ -8,6 +8,9 @@ CI also builds and lints the unsigned release variant and checks its API 34 mini
 non-debuggable manifest and product-output boundary. This validates packaging only; the unsigned
 file is not published as an installable release. The same checks passed locally on September 14,
 2026 (release lint: zero errors, seven warnings) before the subsequent account-adapter changes.
+The default-USB/Korean-UI source at `eb5d5bd` also passed local unsigned release build/lint and the
+all-ABI USB/license/retired-code boundary check. Its manifest reports minimum API 34 and
+`debuggable=false`. It remains unsigned and is not an installable GitHub Release asset.
 
 Before publishing a user-facing release:
 
