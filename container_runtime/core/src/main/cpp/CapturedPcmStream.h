@@ -65,6 +65,9 @@ private:
     bool static_loaded_ = false;
     bool static_exhausted_ = false;
     bool remote_touched_ = false;
+    float pending_left_ = 1;
+    float pending_right_ = 1;
+    bool pending_volume_ = false;
     bool closed_ = false;
     bool failed_ = false;
     std::thread worker_;

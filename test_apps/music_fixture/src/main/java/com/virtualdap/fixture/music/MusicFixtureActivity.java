@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.nio.ByteBuffer;
@@ -19,6 +20,7 @@ public final class MusicFixtureActivity extends Activity {
 
     private static native String playAaudioNative();
     private static native String playAaudioBlockingNative();
+    private static native String playOpenSlNative();
 
     private volatile boolean playing;
     private Thread audioThread;
@@ -65,6 +67,10 @@ public final class MusicFixtureActivity extends Activity {
         aaudioBlocking.setText("Play 96 kHz / AAudio write");
         aaudioBlocking.setOnClickListener(view -> playAaudioBlocking());
         content.addView(aaudioBlocking);
+        Button openSl = new Button(this);
+        openSl.setText("Play 48 kHz / OpenSL ES");
+        openSl.setOnClickListener(view -> playOpenSl());
+        content.addView(openSl);
         Button overlap = new Button(this);
         overlap.setText("Overlap two tracks");
         overlap.setOnClickListener(view -> playOverlap());
@@ -106,7 +112,9 @@ public final class MusicFixtureActivity extends Activity {
         status = new TextView(this);
         status.setText("Idle");
         content.addView(status);
-        setContentView(content);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        setContentView(scroll);
     }
 
     private void play(int sampleRate, boolean floating) {
@@ -270,6 +278,22 @@ public final class MusicFixtureActivity extends Activity {
                 playing = false;
             }
         }, "VirtualDAP-fixture-AAudio-write");
+        audioThread.start();
+    }
+
+    private void playOpenSl() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        playing = true;
+        audioThread = new Thread(() -> {
+            try {
+                String result = playOpenSlNative();
+                runOnUiThread(() -> status.setText(result));
+            } catch (Exception error) {
+                runOnUiThread(() -> status.setText("OPENSL ES ERROR: " + error));
+            } finally {
+                playing = false;
+            }
+        }, "VirtualDAP-fixture-OpenSL");
         audioThread.start();
     }
 

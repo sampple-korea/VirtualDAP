@@ -127,6 +127,20 @@ class ContainerInstrumentedTest {
             }
             assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
             await("blocking AAudio stream release") { !PipelineStore.state.value.guestConnected }
+            click("Play 48 kHz / OpenSL ES")
+            await("captured OpenSL ES buffer-queue PCM") {
+                val audio = PipelineStore.state.value
+                audio.guestConnected && audio.sourceFormat?.sampleRate == 48_000 &&
+                    audio.sourceFormat.encoding == PcmEncoding.PCM_16 && audio.framesReceived >= 48_000
+            }
+            assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+            assertEquals(1f, PipelineStore.state.value.applicationGainLeft)
+            await("OpenSL ES native API contract") {
+                instrumentation.uiAutomation.rootInActiveWindow
+                    ?.findAccessibilityNodeInfosByText("OpenSL ES finished: 48000 frames, callbacks=4")
+                    ?.isNotEmpty() == true
+            }
+            await("OpenSL ES player release") { !PipelineStore.state.value.guestConnected }
             click("Overlap two tracks")
             await("two independently playing PCM streams") {
                 val audio = PipelineStore.state.value

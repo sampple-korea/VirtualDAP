@@ -123,14 +123,28 @@ void CapturedPcmStream::control(PlaybackControl command) {
     switch (command) {
         case PlaybackControl::kPlay:
             state_ = State::kPlaying;
+            if (!remote_touched_ && pending_volume_) {
+                enqueue_locked({PlaybackControl::kVolume, pending_left_, pending_right_});
+            }
             remote_touched_ = true;
             break;
-        case PlaybackControl::kPause: state_ = State::kPaused; break;
+        case PlaybackControl::kPause:
+            state_ = State::kPaused;
+            if (!remote_touched_) {
+                changed_.notify_all();
+                return;
+            }
+            break;
         case PlaybackControl::kStop:
             if (data_mode_ == CapturedDataMode::kStatic) {
                 state_ = State::kStopped;
                 reset_static_cursor_locked(0);
                 discard_static_remote_locked();
+                changed_.notify_all();
+                return;
+            }
+            if (!remote_touched_) {
+                state_ = State::kStopped;
                 changed_.notify_all();
                 return;
             }
@@ -160,6 +174,10 @@ void CapturedPcmStream::control(PlaybackControl command) {
 void CapturedPcmStream::set_volume(float left, float right) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (closed_ || failed_) return;
+    pending_left_ = left;
+    pending_right_ = right;
+    pending_volume_ = true;
+    if (!remote_touched_) return;
     enqueue_locked({PlaybackControl::kVolume, left, right});
     changed_.notify_all();
 }

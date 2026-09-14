@@ -280,6 +280,11 @@ int main() {
     {
         auto idle = CapturedPcmStream::create(config, 16, name + "_idle");
         idle_lifetime = idle;
+        idle->control(PlaybackControl::kPause);
+        idle->control(PlaybackControl::kStop);
+        idle->set_volume(0.5f, 0.5f);
+        std::this_thread::sleep_for(20ms);
+        CHECK(!idle->failed()); // Pre-play controls and gain must not attempt a socket connection.
     }
     CHECK(idle_lifetime.expired()); // Destruction closes an idle worker without a self-reference leak.
     std::puts("Captured PCM: bounded prebuffer, exact bytes, pause/flush/resume/drain, position and release OK");

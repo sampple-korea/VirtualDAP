@@ -16,7 +16,8 @@ route.
 ## Audio bridge
 
 The host socket receiver, output pipeline and the consumer container's Java streaming/static
-`AudioTrack` plus native AAudio output interception are implemented and tested with a fixture app. See the
+`AudioTrack`, native AAudio and native OpenSL ES PCM output interception are implemented and tested
+with a fixture app. See the
 [capture scope](docs/CONTAINER_AUDIO.md) for verified behavior and remaining native/effect paths.
 The older full-OS reference captures at its
 Audio HAL boundary; that reference does not make container capture complete.
@@ -37,7 +38,7 @@ live AudioTrack playback head.
 
 The intended capture point is shared by standard audio clients, not app-specific. Apple Music, Spotify, YouTube Music, TIDAL,
 Qobuz, Amazon Music, Deezer, SoundCloud, Bandcamp, Plexamp, Poweramp, Neutron,
-foobar2000 and other standard AudioTrack or AAudio/Oboe clients use the intended shared capture
+foobar2000 and other standard AudioTrack, AAudio/Oboe or OpenSL ES PCM clients use the intended shared capture
 boundary. Catalog inclusion is not proof that installation, login, decoding and
 playback have been verified for that service. Individual compatibility results must be recorded
 before any service is labeled verified.

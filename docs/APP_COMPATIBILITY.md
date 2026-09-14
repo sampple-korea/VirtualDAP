@@ -5,7 +5,7 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |
-| VirtualDAP fixture, source-built debug | API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base and signed feature split update | Verified, including feature-only class | 48 kHz PCM16, 96 kHz float, prebuffer/pause/resume/volume, two overlapping streams and individual release |
+| VirtualDAP fixture, source-built debug | API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base and signed feature split update | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
 ## Historical installer probe — UAPP is not a catalog target

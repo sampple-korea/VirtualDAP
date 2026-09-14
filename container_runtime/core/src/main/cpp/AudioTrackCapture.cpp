@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <cmath>
 #include "AAudioCapture.h"
+#include "OpenSLCapture.h"
 #include "JniHook/JniHook.h"
 #include "CapturedPcmStream.h"
 
@@ -259,12 +260,17 @@ Java_top_niunaijun_blackbox_core_AudioCapture_install(JNIEnv* env, jclass) {
     INSTALL(buffer, "native_write_native_bytes", "(Ljava/nio/ByteBuffer;IIIZ)I")
 #undef INSTALL
     const bool aaudio_complete = virtualdap::install_aaudio_capture();
+    const bool opensl_complete = virtualdap::install_opensl_capture();
     enabled = complete;
     __android_log_print(complete ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "VirtualDAP-Capture",
                         "AudioTrack PCM capture hooks %s", complete ? "ready" : "unavailable");
     if (!aaudio_complete) {
         __android_log_print(ANDROID_LOG_WARN, "VirtualDAP-Capture",
                             "AAudio capture is unavailable; AudioTrack capture remains active");
+    }
+    if (!opensl_complete) {
+        __android_log_print(ANDROID_LOG_WARN, "VirtualDAP-Capture",
+                            "OpenSL ES capture is unavailable; AudioTrack capture remains active");
     }
     return complete ? JNI_TRUE : JNI_FALSE;
 }
