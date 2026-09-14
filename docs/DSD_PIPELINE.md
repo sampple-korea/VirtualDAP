@@ -25,7 +25,9 @@ bash scripts/verify_dsp.sh
 ./gradlew connectedDebugAndroidTest
 ```
 
-USB endpoint negotiation and the complete guest-to-DSD-output connection remain integration work.
+Direct USB PCM transport and endpoint/clock negotiation are now implemented; see
+[the USB output scope and tests](USB_OUTPUT.md). The complete source-to-DSD-output connection and
+device-specific native-DSD qualification remain integration work.
 The UI must not label those paths available merely because the framing and converter components
 build successfully. A DoP stream must never enter a normal PCM mixer, volume control or resampler.
 

@@ -12,6 +12,8 @@ class VirtualDapApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        ContainerRuntime.onCreate()
+        if (ContainerRuntime.onCreate()) {
+            com.virtualdap.host.audio.usb.UsbHostController.initialize(this)
+        }
     }
 }

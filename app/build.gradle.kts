@@ -6,6 +6,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val prepareUsbLicense = tasks.register<Copy>("prepareUsbLicense") {
+    from(rootProject.file("third_party/libusb/COPYING"))
+    into(layout.buildDirectory.dir("generated/usbLicenseAssets/notices"))
+    rename { "libusb-LICENSE.txt" }
+}
+
 val prepareMusicFixture = tasks.register("prepareMusicFixture") {
     dependsOn(":musicFixture:assembleDebug", ":musicFeature:assembleDebug")
     val baseApk = project(":musicFixture").layout.buildDirectory.file("outputs/apk/debug/musicFixture-debug.apk")
@@ -71,6 +77,7 @@ android {
         layout.buildDirectory.dir("generated/musicFixtureAssets").get().asFile.path,
     )
     sourceSets.getByName("main").assets.directories.add(rootProject.file("third_party/notices").path)
+    sourceSets.getByName("main").assets.directories.add(layout.buildDirectory.dir("generated/usbLicenseAssets").get().asFile.path)
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -83,6 +90,9 @@ android {
 }
 
 tasks.configureEach {
+    if (name == "preBuild" || name.contains("Lint") || name.matches(Regex("merge.*Assets"))) {
+        dependsOn(prepareUsbLicense)
+    }
     if (name == "mergeDebugAndroidTestAssets" ||
         name == "generateDebugAndroidTestLintModel" ||
         name == "lintAnalyzeDebugAndroidTest"

@@ -58,6 +58,8 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The Diagnosti
 clearly labeled host-only output tone test; it is disabled while guest playback is active.
 
 DoP framing and the native DSD-to-PCM filter are described in [DSD pipeline](docs/DSD_PIPELINE.md).
+The opt-in internal direct USB engine, its tests and current limits are described in
+[USB output](docs/USB_OUTPUT.md).
 The filter is built for all four Android ABIs with NDK 28.2.13676358; its license notice is included
 in APK assets.
 

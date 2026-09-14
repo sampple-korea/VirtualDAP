@@ -73,8 +73,9 @@ mid-track after overlap; a new exact-format track can request it again.
 This does not establish all music-service compatibility. Still required are AudioTrack
 playback-speed/effect semantics, static AudioTrack, AAudio/OpenSL ES, app-specific decoder/DRM/login
 tests and wider Android API/ABI runtime coverage.
-DSD framing/filter helpers and USB descriptor negotiation do not yet constitute an integrated
-exclusive USB isochronous driver.
+An opt-in exclusive USB PCM transport is now integrated; see [USB output](USB_OUTPUT.md).
+Its single-stream and hardware-validation limits remain distinct from Android's mixed output path.
+Native DSD/DoP source integration and device qualification are still incomplete.
 
 API signatures are checked against
 [AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java).

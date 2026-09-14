@@ -26,6 +26,7 @@ data class OutputRoute(
     val isUsb: Boolean,
     val sampleRates: List<Int>,
     val encodings: List<Int>,
+    val directUsbDeviceId: Int? = null,
 )
 
 data class PipelineSnapshot(
@@ -45,6 +46,8 @@ data class PipelineSnapshot(
     val applicationGainRight: Float = 1f,
     val connectedStreams: Int = 0,
     val playingStreams: Int = 0,
+    val outputUnderruns: Long = 0,
+    val outputFramesCompleted: Long? = null,
     val framesReceived: Long = 0,
     val bytesReceived: Long = 0,
     val guestDroppedBytes: Long = 0,

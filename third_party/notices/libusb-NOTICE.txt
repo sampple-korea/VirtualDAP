@@ -1,0 +1,10 @@
+VirtualDAP links dynamically to libusb 1.0.30 (LGPL-2.1-or-later).
+Full license: APK asset notices/libusb-LICENSE.txt.
+Upstream source: https://github.com/libusb/libusb
+Pinned source: 87a55632db62c9bdc58cd31d3ccfa673f1bb017f
+
+libusb source is included as third_party/libusb in the VirtualDAP source tree.
+Its Android configuration is used without modification. The CMake build definition
+is in app/src/main/cpp/CMakeLists.txt. The complete VirtualDAP source can be rebuilt
+and signed with a developer's own key, including a modified libusb shared library.
+UAPP code and proprietary audio libraries are not included.

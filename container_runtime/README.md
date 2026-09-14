@@ -33,7 +33,7 @@ explicitly routed to the host, whose provider checks the caller UID.
 - Imported APK signatures are verified, tampered updates are rejected, and the existing app remains
   installed after rejection. Updates require the same current signing certificates; certificate
   rotation migration is not yet implemented and is conservatively rejected.
-- The full six-test instrumentation suite passes on API 33. CI runs the same installed-APK suite
+- The container instrumentation suite passes on API 33. CI runs the same installed-APK suite
   on API 33 and 36, separate from the host build job.
 - Manifest-based split selection and atomic directory publication are implemented. The API 33
   instrumented fixture loads a class found only in a separately signed feature APK after an update.
@@ -57,5 +57,6 @@ Java streaming PCM interception is now implemented; see [its scope and protocol]
 Independent overlapping tracks, source formats and individual release are exercised on API 33/36.
 Streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
 sample-aligned gapless transitions and broader split-delivery-format coverage still require implementation and
-validation. A successful app launch alone is not proof of original-format audio capture. The USB clock/
-descriptor and DSD DSP tests likewise do not prove an integrated USB isochronous output driver.
+validation. A successful app launch alone is not proof of original-format audio capture.
+The integrated direct USB PCM path and its separate hardware-free validation are described in
+[USB output](../docs/USB_OUTPUT.md); physical DAC output has not been measured.

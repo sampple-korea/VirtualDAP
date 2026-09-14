@@ -729,8 +729,15 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
                 when {
                     snapshot.sinkFormat == null -> "Output verification begins when PCM arrives."
                     snapshot.playingStreams > 1 -> "${snapshot.playingStreams} tracks are playing through the Android mixer. Bit-perfect output is disabled during overlap."
+                    snapshot.activeRoute?.directUsbDeviceId != null && (snapshot.applicationGainLeft != 1f || snapshot.applicationGainRight != 1f) ->
+                        "Application gain is applied before direct USB output; bit-perfect output is disabled."
+                    snapshot.activeRoute?.directUsbDeviceId != null && snapshot.outputUnderruns > 0 ->
+                        "Direct USB reported ${snapshot.outputUnderruns} queue underruns. Source bytes were not padded, but uninterrupted output is not verified."
+                    snapshot.activeRoute?.directUsbDeviceId != null && snapshot.bitPerfectActive ->
+                        "Direct USB: source precision preserved, clock negotiation accepted and complete USB transfers observed. DAC presentation timing is not measured."
                     snapshot.bitPerfectActive -> "USB bit-perfect: unchanged PCM, with the OS bit-perfect mixer active on the routed DAC."
                     !snapshot.sourcePreserved -> "Compatibility conversion active: ${snapshot.sinkFormat.shortLabel()}."
+                    snapshot.activeRoute?.directUsbDeviceId != null -> "Direct USB transport. Waiting for clean completed transfers before confirming the output path."
                     snapshot.directPlayback -> "Source PCM is unchanged and Android reports direct support."
                     else -> "Source PCM reaches AudioTrack unchanged; the Android mixer may convert the hardware output."
                 },
@@ -743,6 +750,7 @@ private fun StreamDetails(snapshot: PipelineSnapshot) {
             DiagnosticLine("AudioTrack input", snapshot.sinkFormat.shortLabel())
             DiagnosticLine("Application gain", "${(snapshot.applicationGainLeft * 100).toInt()}% / ${(snapshot.applicationGainRight * 100).toInt()}%")
             DiagnosticLine("Music tracks", "${snapshot.playingStreams} playing / ${snapshot.connectedStreams} connected")
+            snapshot.outputFramesCompleted?.let { DiagnosticLine("USB completed frames", it.toString()) }
         }
     }
 }
@@ -799,7 +807,8 @@ private fun OutputSelector(snapshot: PipelineSnapshot, onSelectRoute: (OutputRou
                             Column {
                                 Text(route.name)
                                 Text(
-                                    if (route.isUsb) "USB · preferred for DAC playback" else "Android audio output",
+                                    if (route.directUsbDeviceId != null) "Exclusive USB · one active stream; bypasses Android mixer"
+                                    else if (route.isUsb) "Android USB output · supports overlapping streams" else "Android audio output",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Muted,
                                 )
@@ -897,6 +906,7 @@ private fun CompatibilityBadge(path: AppAudioPath) {
 
 @Composable
 private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit) {
+    val usb by com.virtualdap.host.audio.usb.UsbHostController.state.collectAsStateWithLifecycle()
     val locale = LocalLocale.current.platformLocale
     val timeFormatter = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
     LazyColumn(
@@ -910,6 +920,46 @@ private fun DiagnosticsScreen(snapshot: PipelineSnapshot, onSelfTest: () -> Unit
                 title = "See every handoff.",
                 subtitle = "Verify routing before involving a guest music service.",
             )
+        }
+        item {
+            SectionCard(title = "USB audio access", icon = Icons.Rounded.Usb) {
+                Text(
+                    "USB access is granted by Android. Inspecting a device does not claim its audio interface or start playback.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted,
+                )
+                if (usb.devices.isEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("No USB audio output is connected.", color = Muted)
+                }
+                usb.devices.forEach { device ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "USB %04x:%04x".format(device.vendorId, device.productId),
+                        style = MaterialTheme.typography.bodySmall, color = Muted,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (device.permission) com.virtualdap.host.audio.usb.UsbHostController.inspect(device.id)
+                            else com.virtualdap.host.audio.usb.UsbHostController.requestPermission(device.id)
+                        },
+                        enabled = !usb.busy,
+                    ) { Text(if (device.permission) "Inspect formats" else "Grant USB access") }
+                    if (device.profiles.isNotEmpty()) {
+                        Text(
+                            device.profiles.take(8).joinToString("\n") {
+                                "${it.channelCount} ch · ${it.bitResolution}-bit / ${it.subslotBytes}-byte slots · alt ${it.alternateSetting}" +
+                                    if (it.rawData) " · raw-data candidate (not confirmed DSD)" else ""
+                            },
+                            style = MaterialTheme.typography.bodySmall, color = Muted,
+                        )
+                    }
+                }
+                usb.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                androidx.compose.material3.TextButton(
+                    onClick = com.virtualdap.host.audio.usb.UsbHostController::refresh, enabled = !usb.busy,
+                ) { Text("Refresh USB devices") }
+            }
         }
         item {
             SectionCard(title = "Output self-test", icon = Icons.Rounded.PlayArrow) {

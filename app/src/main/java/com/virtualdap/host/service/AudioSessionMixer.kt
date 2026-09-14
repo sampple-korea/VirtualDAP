@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Credentials
 import android.os.SystemClock
 import com.virtualdap.host.audio.AndroidAudioSink
+import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.audio.PcmFormat
 import com.virtualdap.host.bridge.*
 import com.virtualdap.host.model.*
@@ -19,6 +20,8 @@ import java.util.concurrent.atomic.AtomicReference
 class AudioSessionMixer(
     private val context: Context,
     private val notify: (String) -> Unit,
+    private val onPlaybackActivity: (Boolean) -> Unit = {},
+    private val beforeOutputStart: () -> Unit = {},
 ) : Closeable {
     private val topology = Any()
     private val sessions = linkedMapOf<Long, Session>()
@@ -26,6 +29,7 @@ class AudioSessionMixer(
     private val closed = AtomicBoolean(false)
     @Volatile private var selectedRoute = PipelineStore.state.value.selectedRouteId
     @Volatile private var routeRevision = 0L
+    private var playbackActive = false
 
     fun createSession(): BridgeEvents = Session(sequence.incrementAndGet())
 
@@ -51,6 +55,10 @@ class AudioSessionMixer(
     private fun publishLocked() {
         if (closed.get()) return
         val active = sessions.values.filter { it.active }
+        if (playbackActive != active.isNotEmpty()) {
+            playbackActive = active.isNotEmpty()
+            onPlaybackActivity(playbackActive)
+        }
         val foreground = (active.ifEmpty { sessions.values.toList() }).maxByOrNull { it.activation }
         val selected = foreground?.state
         PipelineStore.update { current ->
@@ -74,10 +82,11 @@ class AudioSessionMixer(
         if (!closed.compareAndSet(false, true)) return
         val all = synchronized(topology) { sessions.values.toList().also { sessions.clear() } }
         all.forEach { it.shutdown() }
+        onPlaybackActivity(false)
     }
 
     private inner class Session(private val id: Long) : BridgeEvents {
-        val sink = AndroidAudioSink(context)
+        val sink = RoutedAudioSink(context)
         private val operations = Any()
         private val stateRef = AtomicReference(PipelineSnapshot())
         var state: PipelineSnapshot
@@ -113,6 +122,7 @@ class AudioSessionMixer(
                 sessions[id] = this
             }
             reconcile()
+            beforeOutputStart()
             if (active) configure()
             PipelineStore.log("Stream $id connected: ${handshake.format.shortLabel()}")
             notify("Music space connected")
@@ -149,6 +159,11 @@ class AudioSessionMixer(
             configure()
             val source = state.sourceFormat ?: error("Missing source format")
             val count = sink.write(pcm)
+            val usb = sink.usbStatistics()
+            check(usb == null || usb.error == 0) { "Direct USB transfer failed (${usb?.error})" }
+            if (usb != null && usb.underruns > state.outputUnderruns) {
+                PipelineStore.log("Stream $id USB queue ran dry (${usb.underruns} times); no artificial samples were inserted", LogLevel.WARNING)
+            }
             val route = sink.routedOutput()
             val now = SystemClock.elapsedRealtime()
             val bitPerfect = if (now - lastMixerCheck >= 500 || route?.id != state.activeRoute?.id) {
@@ -160,6 +175,8 @@ class AudioSessionMixer(
                 framesReceived = it.framesReceived + count / source.frameSizeBytes,
                 latencyMs = sink.queuedDurationMs(), activeRoute = route ?: it.activeRoute,
                 bitPerfectActive = bitPerfect,
+                outputUnderruns = usb?.underruns ?: 0,
+                outputFramesCompleted = usb?.completedFrames,
             ) }
         }
 
@@ -213,18 +230,22 @@ class AudioSessionMixer(
         }
 
         override fun playbackPosition(): BridgePosition = synchronized(operations) {
+            val usb = sink.usbStatistics()
+            check(usb == null || usb.error == 0) { "Direct USB transfer failed (${usb?.error})" }
             val rate = state.sourceFormat?.sampleRate ?: 48_000
             val queued = ((sink.queuedDurationMs() ?: 0.0) * rate / 1_000.0).toLong()
             BridgePosition((state.framesReceived - positionBase - queued).coerceAtLeast(0), System.nanoTime())
         }
 
         override fun onGuestDisconnected(reason: String?) {
+            var failureReason = reason
             synchronized(operations) {
                 if (disposed) return
                 disposed = true
                 try {
                     if (reason == null && !closed.get()) sink.finish() else sink.close()
                 } catch (error: Exception) {
+                    failureReason = "Output completion failed: ${error.message}"
                     PipelineStore.log("Stream $id output completion failed: ${error.message}", LogLevel.ERROR)
                 } finally {
                     sink.close()
@@ -234,11 +255,11 @@ class AudioSessionMixer(
             synchronized(topology) { sessions.remove(id) }
             reconcile()
             if (!closed.get()) {
-                PipelineStore.log(reason?.let { "Stream $id disconnected: $it" } ?: "Stream $id completed",
-                    if (reason == null) LogLevel.INFO else LogLevel.WARNING)
+                PipelineStore.log(failureReason?.let { "Stream $id disconnected: $it" } ?: "Stream $id completed",
+                    if (failureReason == null) LogLevel.INFO else LogLevel.WARNING)
                 if (PipelineStore.state.value.connectedStreams == 0) {
-                    if (reason != null) PipelineStore.update { it.copy(lastError = reason, phase = PipelinePhase.ERROR) }
-                    notify(if (reason == null) "Waiting for music" else "Audio stream needs attention")
+                    if (failureReason != null) PipelineStore.update { it.copy(lastError = failureReason, phase = PipelinePhase.ERROR) }
+                    notify(if (failureReason == null) "Waiting for music" else "Audio stream needs attention")
                 }
             }
         }

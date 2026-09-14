@@ -20,6 +20,27 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AudioAndInputInstrumentedTest {
+    @Test fun nativeUsbRejectsNonUsbDescriptorsWithoutClosingTheCallerDescriptor() {
+        val profile = com.virtualdap.host.audio.usb.UsbAudioStreamingProfile(
+            configuration = 1, controlInterface = 0, interfaceNumber = 1, alternateSetting = 1,
+            protocol = 0, endpointAddress = 1, feedbackEndpointAddress = null, interval = 1,
+            maximumPacketBytes = 192, synchronizationType = 3, channelCount = 2, subslotBytes = 2,
+            bitResolution = 16, pcm = true, floatingPoint = false, rawData = false, clockEntity = null,
+            rates = listOf(com.virtualdap.host.audio.usb.UsbSampleRateRange(48_000, 48_000)),
+            endpointFrequencyControl = false,
+        )
+        val pipe = android.os.ParcelFileDescriptor.createPipe()
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(pipe[0]).use { input ->
+            android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { output ->
+                assertThrows(IllegalStateException::class.java) {
+                    com.virtualdap.host.audio.usb.NativeUsbOutput(pipe[0].fd, profile)
+                }
+                output.write(73)
+                assertEquals(73, input.read())
+            }
+        }
+    }
+
     @Test fun nativeDsdFilterPreservesChannelsAndChunkContinuity() {
         val source = DsdFormat(2_822_400, 2)
         val dsd = ByteArray(1024) { if (it % 2 == 0) 0xff.toByte() else 0 }

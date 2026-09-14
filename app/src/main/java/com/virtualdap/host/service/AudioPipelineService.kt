@@ -3,11 +3,17 @@ package com.virtualdap.host.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.virtualdap.host.MainActivity
@@ -15,11 +21,14 @@ import com.virtualdap.host.R
 import com.virtualdap.host.audio.AndroidAudioSink
 import com.virtualdap.host.audio.PcmEncoding
 import com.virtualdap.host.audio.PcmFormat
+import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.bridge.BridgePeerPolicy
 import com.virtualdap.host.bridge.LocalSocketBridgeServer
 import com.virtualdap.host.guest.GuestRuntimeController
 import com.virtualdap.host.model.LogLevel
 import com.virtualdap.host.model.PipelinePhase
+import com.virtualdap.host.audio.usb.UsbHostController
+import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.PI
@@ -32,6 +41,19 @@ class AudioPipelineService : Service() {
     private var mixer: AudioSessionMixer? = null
     @Volatile private var serviceStarted = false
     private val selfTestRunning = AtomicBoolean(false)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var playbackWakeLock: PowerManager.WakeLock? = null
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!serviceStarted) return
+            val selected = PipelineStore.state.value.selectedRouteId
+            // Claiming a direct USB interface removes the Android mixer port intentionally.
+            if (UsbHostController.isDirectRoute(selected) && UsbHostController.isDirectDeviceConnected(selected)) return
+            stopPipeline(false)
+            PipelineStore.update { it.copy(lastError = "Audio output disconnected. Choose an output and start playback again.") }
+        }
+    }
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = refreshRoutes()
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = refreshRoutes()
@@ -42,6 +64,8 @@ class AudioPipelineService : Service() {
         audioManager = getSystemService(AudioManager::class.java)
         routes = AndroidAudioSink(this)
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
+        registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED)
+        scope.launch { UsbHostController.state.collect { refreshRoutes() } }
         refreshRoutes()
     }
 
@@ -65,7 +89,17 @@ class AudioPipelineService : Service() {
             serviceStarted = true
         }
         if (bridge != null) return
-        val sessions = AudioSessionMixer(this, ::updateNotification)
+        val sessions = AudioSessionMixer(
+            this, ::updateNotification,
+            onPlaybackActivity = { active -> mainHandler.post { updatePlaybackWakeLock(active && serviceStarted) } },
+            beforeOutputStart = {
+                val deadline = SystemClock.elapsedRealtime() + 4000
+                while (selfTestRunning.get()) {
+                    check(SystemClock.elapsedRealtime() < deadline) { "Output self-test did not release the output" }
+                    Thread.sleep(2)
+                }
+            },
+        )
         try {
             mixer = sessions
             bridge = LocalSocketBridgeServer(
@@ -86,6 +120,7 @@ class AudioPipelineService : Service() {
         bridge = null
         mixer?.close()
         mixer = null
+        updatePlaybackWakeLock(false)
         PipelineStore.update { it.copy(
             enabled = false, phase = PipelinePhase.STOPPED, guestConnected = false, guestPeer = null,
             sourceFormat = null, sinkFormat = null, bitPerfectActive = false, directPlayback = false,
@@ -106,11 +141,16 @@ class AudioPipelineService : Service() {
     }
 
     private fun refreshRoutes() {
-        val available = routes.routes()
+        val available = routes.routes() + UsbHostController.routes()
         val old = PipelineStore.state.value.selectedRouteId
         val selected = old?.takeIf { id -> available.any { it.id == id } }
         PipelineStore.update { it.copy(availableRoutes = available, selectedRouteId = selected) }
-        if (selected != old) mixer?.selectRoute(selected)
+        if (selected != old) {
+            if (serviceStarted && old != null) {
+                stopPipeline(false)
+                PipelineStore.update { it.copy(lastError = "Selected output disconnected. Playback stopped to avoid switching to a speaker.") }
+            } else mixer?.selectRoute(selected)
+        }
     }
 
     private fun runOutputSelfTest() {
@@ -120,11 +160,13 @@ class AudioPipelineService : Service() {
         }
         if (!selfTestRunning.compareAndSet(false, true)) return
         if (!serviceStarted) startPipeline()
+        updatePlaybackWakeLock(true)
         thread(name = "VirtualDAP-self-test") {
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
-            val testSink = AndroidAudioSink(this)
-            testSink.setExclusiveAllowed(false)
+            val testSink = RoutedAudioSink(this)
+            testSink.setExclusiveAllowed(UsbHostController.isDirectRoute(PipelineStore.state.value.selectedRouteId))
             try {
+                if (PipelineStore.state.value.guestConnected) return@thread
                 testSink.selectRoute(PipelineStore.state.value.selectedRouteId)
                 testSink.configure(format)
                 PipelineStore.log("Host-only output self-test started (440 Hz, 2 seconds)")
@@ -149,6 +191,7 @@ class AudioPipelineService : Service() {
             } finally {
                 testSink.close()
                 selfTestRunning.set(false)
+                mainHandler.post { updatePlaybackWakeLock(serviceStarted && PipelineStore.state.value.playingStreams > 0) }
             }
         }
     }
@@ -159,7 +202,24 @@ class AudioPipelineService : Service() {
         updateNotification("Audio pipeline needs attention")
     }
 
+    @android.annotation.SuppressLint("WakelockTimeout")
+    private fun updatePlaybackWakeLock(active: Boolean) {
+        if (active) {
+            // USB bypasses AudioFlinger's wake lock. Hold ours only while a track is active;
+            // pause, disconnect, explicit stop, destruction and process death release it.
+            val lock = playbackWakeLock ?: getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VirtualDAP:AudioPlayback")
+                .apply { setReferenceCounted(false) }
+                .also { playbackWakeLock = it }
+            if (!lock.isHeld) lock.acquire()
+        } else {
+            playbackWakeLock?.let { if (it.isHeld) it.release() }
+        }
+    }
+
     override fun onDestroy() {
+        scope.cancel()
+        unregisterReceiver(noisyReceiver)
         audioManager.unregisterAudioDeviceCallback(deviceCallback)
         stopPipeline(false)
         routes.close()
