@@ -5,6 +5,9 @@ music app is kept as PCM; relabeling or repacking it cannot recover an original 
 
 Implemented components:
 
+- `DsfReader` validates Sony DSF headers, format/channel declarations, bounded block sizes, audio
+  length and metadata boundaries. It streams channel-planar blocks into chronological interleaved
+  DSD packets without loading the whole file or forwarding the final block's padding.
 - `DsdFormat` describes the one-bit sample rate, channel count and source bit order.
 - `DopEncoder` implements the DoP 1.1 marker sequence, preserves markers across packet boundaries,
   keeps channel ordering and handles packed 24-bit or padded four-byte UAC subslots. Truncated
@@ -36,8 +39,9 @@ bash scripts/verify_dsp.sh
 
 Direct USB PCM transport, endpoint/clock negotiation and device-specific native-DSD layout
 qualification and the typed DSD-to-USB sink are now implemented; see
-[the USB output scope and tests](USB_OUTPUT.md). A product-facing DSF/DSDIFF source and playback
-controller remain integration work, so the UI does not yet advertise DSD file playback.
+[the USB output scope and tests](USB_OUTPUT.md). The DSF reader is not yet invoked by a
+product-facing playback controller; DSDIFF parsing also remains integration work, so the UI does
+not yet advertise DSD file playback.
 The UI must not label those paths available merely because the framing and converter components
 build successfully. A DoP stream must never enter a normal PCM mixer, volume control or resampler.
 
