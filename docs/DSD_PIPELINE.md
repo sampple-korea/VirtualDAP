@@ -39,7 +39,9 @@ Implemented components:
   pause, resume and stop controls.
 
 The packet/format tests and native filter tests run without hardware. Android instrumentation also
-checks the real JNI converter, channel separation, packet continuity, and use after close.
+checks the real JNI converter, channel separation, packet continuity, use after close, a complete
+MediaStore DSF-to-AudioTrack foreground-service playback, and fail-closed native mode when no
+exclusive USB route is selected.
 
 ```shell
 git submodule update --init third_party/dsd2pcm
