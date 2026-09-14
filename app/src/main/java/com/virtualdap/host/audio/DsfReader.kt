@@ -1,6 +1,5 @@
 package com.virtualdap.host.audio
 
-import java.io.Closeable
 import java.io.EOFException
 import java.io.InputStream
 
@@ -21,7 +20,7 @@ data class DsfInfo(
  * canonical chronological bytes interleaved by channel and discards only the format-defined tail
  * padding. The input is never buffered as a complete music file.
  */
-class DsfReader private constructor(private val input: InputStream) : Closeable {
+class DsfReader private constructor(private val input: InputStream) : DsdStreamReader {
     val info: DsfInfo
     private val blockCount: Long
     private var blocksRead = 0L
@@ -92,7 +91,7 @@ class DsfReader private constructor(private val input: InputStream) : Closeable 
 
     /** Returns at most [maximumBytes], always containing complete interleaved channel frames. */
     @Synchronized
-    fun readInterleaved(maximumBytes: Int = DEFAULT_PACKET_BYTES): ByteArray? {
+    override fun readInterleaved(maximumBytes: Int): ByteArray? {
         check(!closed) { "DSF reader is closed" }
         require(maximumBytes in info.format.channelCount..MAX_PACKET_BYTES) { "Invalid DSF packet limit" }
         val maximumFrames = maximumBytes / info.format.channelCount
@@ -119,7 +118,10 @@ class DsfReader private constructor(private val input: InputStream) : Closeable 
         return result
     }
 
-    val samplePosition: Long get() = audioBytesReadPerChannel * 8L
+    override val format: DsdFormat get() = info.format
+    override val sampleCountPerChannel: Long get() = info.sampleCountPerChannel
+    override val durationMillis: Long get() = info.durationMillis
+    override val samplePosition: Long get() = audioBytesReadPerChannel * 8L
 
     private fun loadBlockSet(): Boolean {
         if (blocksRead == blockCount) return false
@@ -196,8 +198,6 @@ class DsfReader private constructor(private val input: InputStream) : Closeable 
         private const val MAX_CHUNK_BYTES = 1024 * 1024
         private const val MAX_BLOCK_BYTES = 1024 * 1024
         private const val MAX_PACKET_BYTES = 1024 * 1024
-        private const val DEFAULT_PACKET_BYTES = 64 * 1024
-
         fun open(input: InputStream): DsfReader = try {
             DsfReader(input)
         } catch (failure: Throwable) {

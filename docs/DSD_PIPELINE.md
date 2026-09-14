@@ -5,9 +5,13 @@ music app is kept as PCM; relabeling or repacking it cannot recover an original 
 
 Implemented components:
 
-- `DsfReader` validates Sony DSF headers, format/channel declarations, bounded block sizes, audio
-  length and metadata boundaries. It streams channel-planar blocks into chronological interleaved
-  DSD packets without loading the whole file or forwarding the final block's padding.
+- `DsdContainerReader` detects content from its signature rather than trusting an extension or MIME
+  label. `DsfReader` validates Sony DSF headers, format/channel declarations, bounded block sizes,
+  audio length and metadata boundaries, then streams channel-planar blocks into chronological
+  interleaved DSD packets without loading the whole file or forwarding final-block padding.
+- `DffReader` validates Philips DSDIFF 1.x form/chunk boundaries, version, sound properties,
+  channel IDs and compression declaration. It streams already-clustered MSB-first DSD and rejects
+  DST-compressed content before any audio is emitted.
 - `DsdFormat` describes the one-bit sample rate, channel count and source bit order.
 - `DopEncoder` implements the DoP 1.1 marker sequence, preserves markers across packet boundaries,
   keeps channel ordering and handles packed 24-bit or padded four-byte UAC subslots. Truncated
@@ -39,14 +43,14 @@ bash scripts/verify_dsp.sh
 
 Direct USB PCM transport, endpoint/clock negotiation and device-specific native-DSD layout
 qualification and the typed DSD-to-USB sink are now implemented; see
-[the USB output scope and tests](USB_OUTPUT.md). The DSF reader is not yet invoked by a
-product-facing playback controller; DSDIFF parsing also remains integration work, so the UI does
-not yet advertise DSD file playback.
+[the USB output scope and tests](USB_OUTPUT.md). The DSF/DSDIFF readers are not yet invoked by a
+product-facing playback controller, so the UI does not yet advertise DSD file playback.
 The UI must not label those paths available merely because the framing and converter components
 build successfully. A DoP stream must never enter a normal PCM mixer, volume control or resampler.
 
 Specifications: [DoP 1.1](https://dsd-guide.com/sites/default/files/white-papers/DoP_openStandard_1v1.pdf),
-[Sony DSF](https://dsd-guide.com/sites/default/files/white-papers/DSFFileFormatSpec_E.pdf).
+[Sony DSF](https://dsd-guide.com/sites/default/files/white-papers/DSFFileFormatSpec_E.pdf),
+[Philips DSDIFF 1.5](https://dsd-guide.com/sites/default/files/white-papers/DSDIFF_1.5_Spec.pdf).
 Filter source and license:
 [dsd2pcm at 6cfb3ba](https://github.com/clivem/dsd2pcm/tree/6cfb3bad54c103a74f15f0399fa8f435ecc3592a).
 Native USB layout facts:

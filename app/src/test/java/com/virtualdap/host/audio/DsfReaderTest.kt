@@ -48,6 +48,7 @@ class DsfReaderTest {
             assertEquals(3, reader.info.format.channelCount)
             assertArrayEquals(byteArrayOf(1, 3, 5, 2, 4, 6), reader.readInterleaved())
         }
+        DsdContainerReader.open(ByteArrayInputStream(file)).use { assertTrue(it is DsfReader) }
     }
 
     @Test fun malformedHeadersSizesAndChannelDeclarationsFailBeforePlayback() {
