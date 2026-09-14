@@ -15,6 +15,11 @@ import java.nio.ByteOrder;
 
 /** No network or storage permission: a deterministic app to validate container and PCM behavior. */
 public final class MusicFixtureActivity extends Activity {
+    static { System.loadLibrary("music_fixture_audio"); }
+
+    private static native String playAaudioNative();
+    private static native String playAaudioBlockingNative();
+
     private volatile boolean playing;
     private Thread audioThread;
     private volatile AudioTrack activeTrack;
@@ -52,6 +57,14 @@ public final class MusicFixtureActivity extends Activity {
         pcmStatic.setText("Play 44.1 kHz / static loop");
         pcmStatic.setOnClickListener(view -> playStatic());
         content.addView(pcmStatic);
+        Button aaudio = new Button(this);
+        aaudio.setText("Play 88.2 kHz / AAudio callback");
+        aaudio.setOnClickListener(view -> playAaudio());
+        content.addView(aaudio);
+        Button aaudioBlocking = new Button(this);
+        aaudioBlocking.setText("Play 96 kHz / AAudio write");
+        aaudioBlocking.setOnClickListener(view -> playAaudioBlocking());
+        content.addView(aaudioBlocking);
         Button overlap = new Button(this);
         overlap.setText("Overlap two tracks");
         overlap.setOnClickListener(view -> playOverlap());
@@ -225,6 +238,38 @@ public final class MusicFixtureActivity extends Activity {
                 if (track != null) track.release();
             }
         }, "VirtualDAP-fixture-static");
+        audioThread.start();
+    }
+
+    private void playAaudio() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        playing = true;
+        audioThread = new Thread(() -> {
+            try {
+                String result = playAaudioNative();
+                runOnUiThread(() -> status.setText(result));
+            } catch (Exception error) {
+                runOnUiThread(() -> status.setText("AAUDIO ERROR: " + error));
+            } finally {
+                playing = false;
+            }
+        }, "VirtualDAP-fixture-AAudio");
+        audioThread.start();
+    }
+
+    private void playAaudioBlocking() {
+        if (audioThread != null && audioThread.isAlive()) return;
+        playing = true;
+        audioThread = new Thread(() -> {
+            try {
+                String result = playAaudioBlockingNative();
+                runOnUiThread(() -> status.setText(result));
+            } catch (Exception error) {
+                runOnUiThread(() -> status.setText("AAUDIO WRITE ERROR: " + error));
+            } finally {
+                playing = false;
+            }
+        }, "VirtualDAP-fixture-AAudio-write");
         audioThread.start();
     }
 

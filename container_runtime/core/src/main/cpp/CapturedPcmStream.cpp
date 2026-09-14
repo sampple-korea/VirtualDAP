@@ -14,7 +14,7 @@ std::shared_ptr<CapturedPcmStream> CapturedPcmStream::create(
     }
     auto stream = std::shared_ptr<CapturedPcmStream>(
         new CapturedPcmStream(config, capacity_frames, std::move(endpoint), data_mode));
-    stream->worker_ = std::thread([stream] { stream->run(); });
+    stream->worker_ = std::thread([instance = stream.get()] { instance->run(); });
     return stream;
 }
 
@@ -27,6 +27,7 @@ CapturedPcmStream::CapturedPcmStream(PcmConfig config, size_t capacity_frames, s
       static_buffer_(data_mode == CapturedDataMode::kStatic ? capacity_bytes_ : 0, 0) {}
 
 CapturedPcmStream::~CapturedPcmStream() {
+    close();
     if (worker_.joinable()) {
         if (worker_.get_id() == std::this_thread::get_id()) worker_.detach();
         else worker_.join();
@@ -34,7 +35,12 @@ CapturedPcmStream::~CapturedPcmStream() {
 }
 
 int CapturedPcmStream::write(const uint8_t* data, size_t size, bool blocking) {
+    return write_timed(data, size, blocking ? -1 : 0);
+}
+
+int CapturedPcmStream::write_timed(const uint8_t* data, size_t size, int64_t timeout_ns) {
     if ((!data && size != 0) || size > INT32_MAX || size % config_.frame_size != 0) return -2;
+    if (timeout_ns < -1) return -2;
     std::unique_lock<std::mutex> lock(mutex_);
     if (closed_ || failed_) return -6;
     if (data_mode_ == CapturedDataMode::kStatic) {
@@ -48,14 +54,28 @@ int CapturedPcmStream::write(const uint8_t* data, size_t size, bool blocking) {
         return static_cast<int>(copied);
     }
     size_t copied = 0;
+    const auto now = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::nanoseconds(timeout_ns > 0 ? timeout_ns : 0);
+    const auto deadline = timeout_ns > 0 && timeout < std::chrono::steady_clock::time_point::max() - now
+        ? now + timeout : std::chrono::steady_clock::time_point::max();
     while (copied < size && !closed_ && !failed_) {
         if (queued_bytes_ == capacity_bytes_ || state_ == State::kStopping) {
-            if (!blocking) break;
-            changed_.wait(lock);
+            if (timeout_ns == 0) break;
+            if (timeout_ns < 0) {
+                changed_.wait(lock);
+            } else if (changed_.wait_until(lock, deadline) == std::cv_status::timeout) {
+                break;
+            }
             continue;
         }
         const size_t chunk = std::min({size - copied, capacity_bytes_ - queued_bytes_, packet_bytes_});
-        queue_.emplace_back(data + copied, data + copied + chunk);
+        try {
+            queue_.emplace_back(data + copied, data + copied + chunk);
+        } catch (...) {
+            failed_ = closed_ = true;
+            changed_.notify_all();
+            break;
+        }
         copied += chunk;
         queued_bytes_ += chunk;
         changed_.notify_all();
@@ -69,7 +89,13 @@ bool CapturedPcmStream::enqueue_locked(Command command) {
         changed_.notify_all();
         return false;
     }
-    commands_.push_back(command);
+    try {
+        commands_.push_back(command);
+    } catch (...) {
+        failed_ = closed_ = true;
+        changed_.notify_all();
+        return false;
+    }
     return true;
 }
 
@@ -82,11 +108,9 @@ void CapturedPcmStream::reset_static_cursor_locked(size_t frame) {
 
 void CapturedPcmStream::discard_static_remote_locked() {
     ++generation_;
-    std::deque<Command> retained;
-    for (const auto& command : commands_) {
-        if (command.type == PlaybackControl::kVolume) retained.push_back(command);
-    }
-    commands_.swap(retained);
+    commands_.erase(std::remove_if(commands_.begin(), commands_.end(), [](const Command& command) {
+        return command.type != PlaybackControl::kVolume;
+    }), commands_.end());
     if (remote_touched_) {
         enqueue_locked({PlaybackControl::kPause});
         enqueue_locked({PlaybackControl::kFlush});
@@ -122,6 +146,10 @@ void CapturedPcmStream::control(PlaybackControl command) {
             queued_bytes_ = 0;
             ++generation_;
             position_ = {};
+            if (!remote_touched_) {
+                changed_.notify_all();
+                return;
+            }
             break;
         case PlaybackControl::kVolume: return;
     }
@@ -267,7 +295,13 @@ void CapturedPcmStream::run() {
                 // Count this in-flight packet against capacity until the host acknowledges it.
             } else if (data_mode_ == CapturedDataMode::kStatic && state_ == State::kPlaying &&
                        static_loaded_ && !static_exhausted_) {
-                pcm = next_static_packet_locked();
+                try {
+                    pcm = next_static_packet_locked();
+                } catch (...) {
+                    failed_ = closed_ = true;
+                    changed_.notify_all();
+                    break;
+                }
                 static_pcm = true;
             } else if (state_ == State::kStopping) {
                 command = {PlaybackControl::kStop};

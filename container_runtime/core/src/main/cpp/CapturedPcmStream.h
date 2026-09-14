@@ -13,13 +13,14 @@ namespace virtualdap {
 enum class CapturedDataMode { kStatic, kStream };
 
 /** Bounded producer buffer. Only its worker touches the remote output; callbacks never play twice. */
-class CapturedPcmStream : public std::enable_shared_from_this<CapturedPcmStream> {
+class CapturedPcmStream {
 public:
     static std::shared_ptr<CapturedPcmStream> create(
         PcmConfig config, size_t capacity_frames, std::string endpoint = kDefaultSocketName,
         CapturedDataMode data_mode = CapturedDataMode::kStream);
     ~CapturedPcmStream();
     int write(const uint8_t* data, size_t size, bool blocking);
+    int write_timed(const uint8_t* data, size_t size, int64_t timeout_ns);
     void control(PlaybackControl command);
     void set_volume(float left, float right);
     int reload_static();

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cmath>
+#include "AAudioCapture.h"
 #include "JniHook/JniHook.h"
 #include "CapturedPcmStream.h"
 
@@ -176,8 +177,9 @@ jint array_write(JNIEnv* env, jobject object, Array input, jint offset, jint siz
     if (env->ExceptionCheck()) return -3;
     if (!value) return INT32_MIN;
     if (!input || offset < 0 || size < 0 || offset > env->GetArrayLength(input) - size) return -2;
-    const size_t requested = static_cast<size_t>(size) * sizeof(Element);
-    const size_t bytes = std::min(requested, value->maximum_write_bytes());
+    const size_t element_limit = value->maximum_write_bytes() / sizeof(Element);
+    const size_t elements = std::min(static_cast<size_t>(size), element_limit);
+    const size_t bytes = elements * sizeof(Element);
     const size_t count = (bytes - bytes % value->frame_size()) / sizeof(Element);
     if (count == 0) return 0;
     std::vector<Element> samples(count);
@@ -256,8 +258,13 @@ Java_top_niunaijun_blackbox_core_AudioCapture_install(JNIEnv* env, jclass) {
     INSTALL(floats, "native_write_float", "([FIIIZ)I")
     INSTALL(buffer, "native_write_native_bytes", "(Ljava/nio/ByteBuffer;IIIZ)I")
 #undef INSTALL
+    const bool aaudio_complete = virtualdap::install_aaudio_capture();
     enabled = complete;
     __android_log_print(complete ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "VirtualDAP-Capture",
                         "AudioTrack PCM capture hooks %s", complete ? "ready" : "unavailable");
+    if (!aaudio_complete) {
+        __android_log_print(ANDROID_LOG_WARN, "VirtualDAP-Capture",
+                            "AAudio capture is unavailable; AudioTrack capture remains active");
+    }
     return complete ? JNI_TRUE : JNI_FALSE;
 }

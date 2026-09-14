@@ -15,6 +15,7 @@ list(APPEND dobby_sources "${CMAKE_CURRENT_LIST_DIR}/compat/code_patch_android.c
 set_property(TARGET dobby_static PROPERTY SOURCES "${dobby_sources}")
 
 add_library(blackbox SHARED
+    "${CMAKE_CURRENT_LIST_DIR}/AAudioCapture.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/AudioTrackCapture.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/AtomicPackagePublisher.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/CapturedPcmStream.cpp"

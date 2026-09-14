@@ -78,8 +78,8 @@ class ContainerInstrumentedTest {
                 }
             }
             for ((button, rate, encoding) in listOf(
-                Triple("48 kHz", 48_000, PcmEncoding.PCM_16),
-                Triple("96 kHz", 96_000, PcmEncoding.PCM_FLOAT),
+                Triple("Play 48 kHz / 16-bit", 48_000, PcmEncoding.PCM_16),
+                Triple("Play 96 kHz / float", 96_000, PcmEncoding.PCM_FLOAT),
             )) {
                 click(button)
                 await("captured $rate Hz PCM at the host output") {
@@ -111,6 +111,22 @@ class ContainerInstrumentedTest {
             }
             assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
             await("static track release") { !PipelineStore.state.value.guestConnected }
+            click("Play 88.2 kHz / AAudio callback")
+            await("captured AAudio callback PCM") {
+                val audio = PipelineStore.state.value
+                audio.guestConnected && audio.sourceFormat?.sampleRate == 88_200 &&
+                    audio.sourceFormat.encoding == PcmEncoding.PCM_16 && audio.framesReceived >= 88_200
+            }
+            assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+            await("AAudio stream release") { !PipelineStore.state.value.guestConnected }
+            click("Play 96 kHz / AAudio write")
+            await("captured blocking AAudio PCM") {
+                val audio = PipelineStore.state.value
+                audio.guestConnected && audio.sourceFormat?.sampleRate == 96_000 &&
+                    audio.sourceFormat.encoding == PcmEncoding.PCM_FLOAT && audio.framesReceived >= 96_000
+            }
+            assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+            await("blocking AAudio stream release") { !PipelineStore.state.value.guestConnected }
             click("Overlap two tracks")
             await("two independently playing PCM streams") {
                 val audio = PipelineStore.state.value

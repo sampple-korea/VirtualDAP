@@ -244,8 +244,13 @@ int main() {
     PcmConfig config;
     auto stream = CapturedPcmStream::create(config, 16, name);
     const std::vector<uint8_t> first(64, 0x45), discarded(32, 0x77), last(16, 0x23);
+    stream->control(PlaybackControl::kFlush);
+    std::this_thread::sleep_for(20ms);
+    CHECK(!connected); // A local pre-play flush must not open an otherwise idle output.
     CHECK(stream->write(first.data(), first.size(), false) == 64);
     CHECK(stream->write(last.data(), 4, false) == 0);
+    CHECK(stream->write_timed(last.data(), 4, 2'000'000) == 0);
+    CHECK(stream->write_timed(last.data(), 4, -2) == -2);
     CHECK(stream->write(last.data(), 3, false) == -2);
     CHECK(!connected); // Prebuffering neither opens nor plays the remote sink.
     stream->control(PlaybackControl::kPlay);
@@ -271,6 +276,12 @@ int main() {
     std::vector<uint8_t> expected(first);
     expected.insert(expected.end(), last.begin(), last.end());
     CHECK(received == expected);
+    std::weak_ptr<CapturedPcmStream> idle_lifetime;
+    {
+        auto idle = CapturedPcmStream::create(config, 16, name + "_idle");
+        idle_lifetime = idle;
+    }
+    CHECK(idle_lifetime.expired()); // Destruction closes an idle worker without a self-reference leak.
     std::puts("Captured PCM: bounded prebuffer, exact bytes, pause/flush/resume/drain, position and release OK");
     test_static_capture();
 }

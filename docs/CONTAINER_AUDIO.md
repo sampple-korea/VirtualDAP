@@ -1,18 +1,24 @@
-# Container AudioTrack transport
+# Container AudioTrack and AAudio transport
 
-The consumer container intercepts decoded Java `AudioTrack` streaming and static PCM in its
-application process, before the hosted Application is constructed. Native registration uses the
-source-built container hook engine. No system binary, root service or host-wide audio-capture
-permission is used.
+The consumer container intercepts decoded Java `AudioTrack` streaming/static PCM and native AAudio
+output PCM in its application process, before the hosted Application is constructed. Native
+registration uses the source-built container hook engine. No system binary, root service or
+host-wide audio-capture permission is used.
 
 ```text
 hosted AudioTrack.write → bounded streaming queue / static buffer iterator → private Unix socket
-                       → host AudioPipelineService → real host AudioTrack → output route
+hosted AAudio callback  → preallocated callback buffer ────────────────────┤
+hosted AAudio write     → timeout-aware bounded streaming queue ───────────┘
+                         → host AudioPipelineService → real host AudioTrack → output route
 ```
 
-The intercepted track's original native output is not started or written, so playback is not
-duplicated. Its native allocation is still released normally. Unsupported compressed/native audio
-paths retain their original Android behavior and must not be reported as captured.
+An intercepted AudioTrack's original native output is not started or written, so playback is not
+duplicated. A captured AAudio stream keeps an unstarted real stream only as the opaque application
+handle and to obtain Android's negotiated PCM configuration; its native data/error callbacks are
+removed and no original start or write call is made. Native allocations are still released
+normally. Unsupported compressed/native audio paths retain their original Android behavior and
+must not be reported as captured. Failure to install the AAudio hooks does not disable the separate
+AudioTrack capture path.
 
 ## Implemented boundary
 
@@ -21,8 +27,13 @@ paths retain their original Android behavior and must not be reported as capture
   Playback-head positioning, reload, disabled/finite/infinite loop points and immediate stop are
   implemented without expanding repeated audio in memory.
 - Java byte[], short[], float[] and direct/non-direct ByteBuffer write entry points.
+- Native AAudio PCM16, float, packed PCM24 and PCM32 output in both data-callback and blocking-write
+  modes. Input and requested non-PCM streams pass through unchanged.
 - Prebuffer before play; blocking backpressure and non-blocking partial writes.
 - Play, pause, flush while paused, resume, draining stop, release and finalization.
+- AAudio start/pause/flush/stop state checks, timeout-aware partial writes, frames-written/read
+  counters and source-frame monotonic/boottime timestamps. State-changing or close calls colliding
+  with an AAudio callback are rejected as Android does.
 - Application left/right volume is forwarded to the actual host track. Non-unity application gain
   prevents the UI from labeling the output bit-perfect.
 - Playback-head and timestamp queries return host observations in source-frame units.
@@ -35,6 +46,10 @@ against its queue limit, while a static finite or infinite loop is generated inc
 single retained buffer. Controls have their own bounded queue and precede the next PCM packet. Pause
 can therefore take effect after the current bounded submission rather than waiting behind the entire
 prebuffer or loop. Guest callbacks never hold JNI array pins while doing a blocking output write.
+AAudio callback storage is allocated when the stream opens rather than on its callback thread. The
+application callback itself performs no socket or bridge operation; after it returns, the dedicated
+worker submits the block using bounded 5 ms waits so pause, flush, stop and close remain observable.
+A flush before first playback stays local and does not open an idle host output.
 
 ## Protocol 3
 
@@ -61,12 +76,14 @@ filter. Hardware latency beyond Android's playback head is not claimed measured.
 ## Evidence and remaining work
 
 The independent fixture APK runs inside ordinary-UID API 33/36 x86_64 emulators and emits streaming
-48 kHz PCM16, streaming 96 kHz float, and a finite-loop 44.1 kHz static PCM16 buffer.
-Instrumentation verifies reception at the host output, source formats, static reload/position/loop
-entry points, mute/unity gain, pause/resume and no reported drops. The host C++ test checks exact
+48 kHz PCM16, streaming 96 kHz float, a finite-loop 44.1 kHz static PCM16 buffer, an 88.2 kHz PCM16
+AAudio callback stream and a 96 kHz float AAudio blocking-write stream. Instrumentation verifies
+reception at the host output, source formats, static reload/position/loop entry points, AAudio
+callback collision and duplicate-start rules, timed native writes, pause/flush/resume, timestamp
+and frame progress, mute/unity gain and no reported drops. The host C++ test checks exact
 streaming and static packet bytes, bounded prebuffering, finite/infinite loop generation, seek,
-reload, immediate static stop, streaming drain, volume controls, playback position and worker
-cleanup.
+reload, immediate static stop, timed full-buffer writes, pre-play flush isolation, streaming drain,
+volume controls, playback position and worker cleanup.
 
 The receiver now accepts up to 16 independent streams, each with its own output track, format,
 backpressure, controls and playback-head observations. Android mixes overlapping tracks, and the
@@ -80,8 +97,8 @@ crossfade timing across independent hardware tracks. Bit-perfect mode is not aut
 mid-track after overlap; a new exact-format track can request it again.
 
 This does not establish all music-service compatibility. Still required are AudioTrack
-playback-speed/effect semantics, AAudio/OpenSL ES, app-specific decoder/DRM/login tests and wider
-Android API/ABI runtime coverage.
+playback-speed/effect semantics, OpenSL ES, app-specific decoder/DRM/login tests and wider Android
+API/ABI runtime coverage.
 An opt-in exclusive USB PCM transport is now integrated; see [USB output](USB_OUTPUT.md).
 Its single-stream and hardware-validation limits remain distinct from Android's mixed output path.
 Streaming apps remain PCM sources at this capture boundary. Local DSF/DSDIFF playback has a
@@ -89,4 +106,6 @@ separate product-facing native DSD/DoP path with reference-qualified device layo
 relabel a service's decoded PCM as DSD.
 
 API signatures are checked against
-[AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java).
+[AOSP Android 16 AudioTrack](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/media/java/android/media/AudioTrack.java),
+and native state behavior is matched to the current
+[AOSP AAudio AudioStream](https://android.googlesource.com/platform/frameworks/av/+/master/media/libaaudio/src/core/AudioStream.cpp).

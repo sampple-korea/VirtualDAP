@@ -28,8 +28,10 @@ explicitly routed to the host, whose provider checks the caller UID.
   launches its Application/Activity in a container process, persists its private launch counter and
   reports the actual process startup back to the host. The fixture is not installed in Android's
   system package manager. This is an instrumentation test, not a timer-based UI simulation.
-- The same fixture's 48 kHz PCM16 and 96 kHz float reach the host audio service. Tests cover
-  prebuffering, mute/unity gain, pause/resume, track release and zero reported dropped bytes.
+- The same fixture's Java 48 kHz PCM16, 96 kHz float and 44.1 kHz static-loop PCM plus native
+  88.2 kHz PCM16 AAudio callback and 96 kHz float AAudio blocking-write streams reach the host audio
+  service. Tests cover prebuffering, timed writes, callback collision rules, mute/unity gain,
+  pause/flush/resume, track release and zero reported dropped bytes.
 - Imported APK signatures are verified, tampered updates are rejected, and the existing app remains
   installed after rejection. Updates require the same current signing certificates; certificate
   rotation migration is not yet implemented and is conservatively rejected.
@@ -53,10 +55,10 @@ It requests no network, microphone or storage permissions.
 
 ## Not yet verified or complete
 
-Java streaming and static PCM interception is now implemented; see
+Java streaming/static PCM and native AAudio output interception are now implemented; see
 [its scope and protocol](../docs/CONTAINER_AUDIO.md).
 Independent overlapping tracks, source formats and individual release are exercised on API 33/36.
-Streaming-service login/DRM compatibility, AAudio/OpenSL ES paths,
+Streaming-service login/DRM compatibility, OpenSL ES paths,
 sample-aligned gapless transitions and broader split-delivery-format coverage still require implementation and
 validation. A successful app launch alone is not proof of original-format audio capture.
 The integrated direct USB PCM path and its separate hardware-free validation are described in
