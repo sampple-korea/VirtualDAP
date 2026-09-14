@@ -12,6 +12,17 @@ APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_current_android_new_intents_use_activity_record(self):
+        thread = (JAVA / "app/BActivityThread.java").read_text()
+        block = thread.split("public void handleNewIntent(", 1)[1].split("public void scheduleReceiver(", 1)[0]
+        self.assertIn("Build.VERSION.SDK_INT >= 31", block)
+        self.assertIn("NewIntentCompat.deliver(", block)
+        helper = (JAVA / "utils/compat/NewIntentCompat.java").read_text()
+        self.assertIn("activities.get(token)", helper)
+        self.assertIn('getDeclaredMethod("handleNewIntent", recordClass, List.class)', helper)
+        self.assertIn("method.invoke(thread, record, intents)", helper)
+        self.assertIn("throw new IllegalStateException", helper)
+
     def test_no_fabricated_service_identity_or_authentication(self):
         hooks = (JAVA / "fake/hook/HookManager.java").read_text()
         for name in ("GmsProxy", "GoogleAccountManagerProxy", "AuthenticationProxy"):

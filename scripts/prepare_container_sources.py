@@ -189,6 +189,18 @@ def prepare(upstream, dobby, overrides, output):
     content = content.replace('Slog.d(TAG, "System hooks installed successfully");', "")
     core.write_text(content, encoding="utf-8")
 
+    activity_thread = package / "app/BActivityThread.java"
+    content = activity_thread.read_text(encoding="utf-8")
+    content = replace_once(
+        content,
+        "            if (BRActivityThread.get(BlackBoxCore.mainThread())._check_performNewIntents(null, null) != null) {",
+        "            if (Build.VERSION.SDK_INT >= 31) {\n"
+        "                top.niunaijun.blackbox.utils.compat.NewIntentCompat.deliver(\n"
+        "                        mainThread, token, Collections.singletonList(newIntent));\n"
+        "            } else if (BRActivityThread.get(BlackBoxCore.mainThread())._check_performNewIntents(null, null) != null) {",
+    )
+    activity_thread.write_text(content, encoding="utf-8")
+
     activity_proxy = package / "fake/service/IActivityManagerProxy.java"
     content = activity_proxy.read_text(encoding="utf-8")
     content = replace_once(

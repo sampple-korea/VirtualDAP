@@ -12,7 +12,9 @@ import java.io.Closeable
  * Test-only paced socket receiver. Observes real container capture and control messages without
  * requiring a DAC. It never creates an AudioTrack or represents receipt as hardware playback.
  */
-internal class CaptureProbe : Closeable {
+internal class CaptureProbe(
+    private val observePcm: ((Credentials, PcmFormat, ByteArray) -> Unit)? = null,
+) : Closeable {
     private val lock = Any()
     private val sessions = linkedSetOf<ProbeSession>()
     private val server = LocalSocketBridgeServer(eventsFactory = { ProbeSession() })
@@ -42,10 +44,12 @@ internal class CaptureProbe : Closeable {
     }
 
     private inner class ProbeSession : BridgeEvents {
+        private lateinit var peer: Credentials
         var playing = false
         var snapshot = PipelineSnapshot()
         private var nextDeadline = 0L
         override fun onGuestConnected(peer: Credentials, handshake: BridgeHandshake) = synchronized(lock) {
+            this.peer = peer
             snapshot = PipelineSnapshot(sourceFormat = handshake.format, guestPeer = "capture probe")
             sessions.add(this)
             publish(this)
@@ -62,6 +66,7 @@ internal class CaptureProbe : Closeable {
             nextDeadline = maxOf(nextDeadline, System.nanoTime()) + duration
             val wait = (nextDeadline - System.nanoTime()) / 1_000_000L
             if (wait > 0) SystemClock.sleep(wait)
+            observePcm?.invoke(peer, format, pcm)
             synchronized(lock) {
                 snapshot = snapshot.copy(
                     framesReceived = snapshot.framesReceived + pcm.size / format.frameSizeBytes,

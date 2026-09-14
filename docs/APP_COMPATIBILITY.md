@@ -8,7 +8,7 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
 | VirtualDAP fixture, API 34 minimum / official-output build | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified base, split update and device-targeted APKS | Verified, including feature-only class | Paced test receiver: Java streaming/static, AAudio callback/write, OpenSL ES, controls, overlapping capture and individual release; **not DAC output** |
 | YouTube Music 8.09.50, version code 80950280, x86_64 | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified copying the installed host base/split package into the container | Application.onCreate callback verified; subsequent visible sign-in-screen check **fails** | Not tested; login, DRM, UI navigation and music playback remain unverified |
-| foobar2000 mobile 2.25.9, version code 1093, official x86_64 APK | API 36 Google APIs x86_64, ordinary UID | Verified APK import | Application.onCreate and the visible welcome screen verified, including resumed-activity and live-process evidence | Not tested; a welcome screen is not playback verification |
+| foobar2000 mobile 2.25.9, version code 1093, official x86_64 APK | API 36 Google APIs x86_64, ordinary UID | Verified APK import | Application.onCreate, welcome screen and completed ordinary onboarding | Generated WAV: captured 48 kHz / stereo / PCM16 from the app PID; left 440 Hz and right 660 Hz signals verified at the paced test receiver; **not DAC output** |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
 The current minimum is API 34. USB audio is now the default product mode, with official bit-perfect
@@ -93,6 +93,40 @@ After the stop-state reduction and regression tests were added, the local debug 
 103 JVM tests and all 12 API 36 instrumentation tests passed (48.739 seconds for instrumentation).
 
 ## Optional local compatibility smoke
+
+### Current Android intent delivery and independent-player PCM
+
+The default-USB/Korean-UI build passed GitHub run `34896732514` at `9e5e6ed` (host,
+API 34 and API 36), and the UI recovery/USB receiver fixes passed run `34898228784`
+at `1d0bc87`. These runs precede the new-intent changes described here.
+
+The first independent-player WAV check exposed missing normal Android permissions:
+`REORDER_TASKS` for returning to an existing container task and `BROADCAST_STICKY` for
+legacy playback-state broadcasts. Both are now declared normally; the emulator's package
+manager reported them granted at installation, without a root/permission override.
+
+A further failure showed that current Android's `ActivityThread.handleNewIntent` takes an
+`ActivityClientRecord`, while the pinned engine tried only old token-based signatures and
+silently omitted the callback. The narrow adapter now looks up this process's actual record
+by token and invokes the current signature. It does not manufacture an Activity or suppress
+an application exception. The regular fixture now checks a unique new-intent marker and
+that the original activity instance is preserved.
+
+After these fixes and ordinary first-run onboarding (default theme, skip optional library
+setup), the unmodified player opened a locally generated 10-second WAV via its public VIEW
+activity. The optional smoke passed in **36.420 seconds**. It checks the sending PID, 48 kHz,
+stereo PCM16, and more than 95% test-tone energy in each channel over a one-second window
+(left 440 Hz, right 660 Hz). This is stronger than a startup callback or counting nonzero
+bytes. It does not establish bit-exact output, physical USB/DAC playback, streaming-service
+login or subscription/DRM compatibility. No personal media or accounts are used.
+The updated ordinary-UID API 36 suite passed all 15 tests in 67.842 seconds, including
+same-instance new-intent delivery. Debug build/lint, 114 JVM tests, 13 prepared-source checks
+and the four-ABI USB/retired-code APK boundary also passed locally.
+
+Add `-e externalWav true` to the local compatibility command to perform this check after
+completing the player's ordinary first-run setup. This opt-in test creates and removes its
+own test WAV in host cache, stops the selected player afterward, and requires that the
+player support the public WAV VIEW action. No external APK is bundled in the test suite.
 
 The instrumentation APK accepts `externalApk` (a filename in the debug host's private cache) and
 `externalPackage`. This mode checks import and Application.onCreate only; it deliberately does not

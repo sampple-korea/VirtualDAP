@@ -28,6 +28,7 @@ public final class MusicFixtureActivity extends Activity {
     private volatile AudioTrack activeTrack;
     private volatile boolean stopFirstTrack;
     private TextView status;
+    private TextView newIntentStatus;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -40,6 +41,9 @@ public final class MusicFixtureActivity extends Activity {
         identity.setText("MUSIC FIXTURE READY\nPackage: " + getPackageName() + "\nLaunches: " + launches);
         identity.setTextSize(20);
         content.addView(identity);
+        newIntentStatus = new TextView(this);
+        newIntentStatus.setText("NEW INTENT: pending");
+        content.addView(newIntentStatus);
         TextView mediaRoutes = new TextView(this);
         try {
             android.media.MediaRouter2 router = android.media.MediaRouter2.getInstance(this);
@@ -128,6 +132,13 @@ public final class MusicFixtureActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         setContentView(scroll);
+    }
+
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        if ("com.virtualdap.fixture.NEW_INTENT".equals(intent.getAction())) {
+            newIntentStatus.setText("NEW INTENT: " + intent.getStringExtra("request"));
+        }
     }
 
     private void checkUnsupportedOutput() {

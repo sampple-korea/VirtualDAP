@@ -59,11 +59,16 @@ class ContainerInstrumentedTest {
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == expected })
             if (InstrumentationRegistry.getArguments().getString("importOnly") == "true") return
-            CaptureProbe().use { probe ->
+            val externalWav = InstrumentationRegistry.getArguments().getString("externalWav") == "true"
+            val evidence = ExternalWavEvidence()
+            CaptureProbe(if (externalWav) evidence::observe else null).use { probe ->
                 probe.start()
                 ContainerRuntime.launch(expected)
                 await("external Application.onCreate (not a playback certification)") {
                     ContainerRuntime.state.value.applications.any { it.packageName == expected && it.lastStartedPid != null }
+                }
+                if (externalWav) {
+                    evidence.verifyPlayback(expected)
                 }
                 InstrumentationRegistry.getArguments().getString("externalUiText")?.let { expectedText ->
                     require(expectedText.isNotBlank() && expectedText.length <= 200)
@@ -130,6 +135,23 @@ class ContainerInstrumentedTest {
             await("fixture resumed activity lifecycle") {
                 ContainerRuntime.state.value.foregroundActivity?.packageName == FIXTURE
             }
+            val firstActivity = requireNotNull(ContainerRuntime.state.value.foregroundActivity)
+            val newRequest = java.util.UUID.randomUUID().toString()
+            val intent = requireNotNull(top.niunaijun.blackbox.BlackBoxCore.getBPackageManager()
+                .getLaunchIntentForPackage(FIXTURE, 0)).apply {
+                action = "com.virtualdap.fixture.NEW_INTENT"
+                setPackage(FIXTURE)
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("request", newRequest)
+            }
+            top.niunaijun.blackbox.BlackBoxCore.get().startActivity(intent, 0)
+            await("new intent delivered to the existing activity") {
+                instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText("NEW INTENT: $newRequest")
+                    ?.any { it.isVisibleToUser && it.text?.toString() == "NEW INTENT: $newRequest" } == true
+            }
+            assertEquals("A new intent must not replace the existing activity instance", firstActivity,
+                ContainerRuntime.state.value.foregroundActivity)
             click("Check unsupported output rejection")
             await("ordinary-UID MediaRouter2 discovery") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
