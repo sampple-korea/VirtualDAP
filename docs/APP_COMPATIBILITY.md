@@ -7,11 +7,20 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 | --- | --- | --- | --- | --- |
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
 | VirtualDAP fixture, API 34 minimum / official-output build | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified base, split update and device-targeted APKS | Verified, including feature-only class | Paced test receiver: Java streaming/static, AAudio callback/write, OpenSL ES, controls, overlapping capture and individual release; **not DAC output** |
+| YouTube Music 8.09.50, version code 80950280, x86_64 | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified copying the installed host base/split package into the container | Application.onCreate callback verified | Not tested; login, DRM, UI navigation and music playback remain unverified |
 | Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
 The current minimum is API 34. The output policy now requires an officially supported bit-perfect
 route; historical mixed-output playback results are not evidence for that route. Current capture
 instrumentation uses a paced test receiver, separate from production output.
+
+At commit `959a2c4`, GitHub run `34818766657` passed the host build and ordinary-UID fixture
+instrumentation on both API 34 and API 36. This precedes the later unsupported-format rejection
+changes and is not evidence for those changes. At `8b7b3f0`, local API 36 instrumentation additionally
+verified AudioTrack PCM8 write/start rejection and cleanup, AAudio IEC61937 rejection, and OpenSL
+PCM8 rejection, followed by the existing supported capture/controls/split-install regression suite.
+The YouTube Music result above used that same build's installed-app import/start smoke (1 test,
+35.566 seconds). It proves application initialization only, not a usable signed-in music session.
 
 ## Optional local compatibility smoke
 
