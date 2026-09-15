@@ -140,6 +140,25 @@ def prepare(upstream, dobby, overrides, output):
         (package / f"fake/service/{name}.java").unlink()
     hooks.write_text(content, encoding="utf-8")
 
+    account_service = package / "core/system/accounts/BAccountManagerService.java"
+    content = account_service.read_text(encoding="utf-8")
+    begin = content.index("    public AuthenticatorDescription[] getAuthenticatorTypes(int userId)")
+    end = content.index("    @Override", begin)
+    content = content[:begin] + '''    public AuthenticatorDescription[] getAuthenticatorTypes(int userId) throws RemoteException {
+        // Discover installed authenticators even before the user creates their first account.
+        // Query this user's actual service declarations, not saved accounts or host identities.
+        Map<String, AuthenticatorInfo> installed = new java.util.TreeMap<>();
+        generateServicesMap(mPms.queryIntentServices(
+                new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT),
+                PackageManager.GET_META_DATA, userId), installed, new RegisteredServicesParser());
+        List<AuthenticatorDescription> descriptions = new ArrayList<>();
+        for (AuthenticatorInfo info : installed.values()) descriptions.add(info.desc);
+        return descriptions.toArray(new AuthenticatorDescription[0]);
+    }
+
+''' + content[end:]
+    account_service.write_text(content, encoding="utf-8")
+
     package_proxy = package / "fake/service/IPackageManagerProxy.java"
     content = package_proxy.read_text(encoding="utf-8")
     content = replace_once(content,

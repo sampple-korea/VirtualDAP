@@ -56,6 +56,34 @@ For the next check, the actual `Phonesky.apk` was obtained from the official API
 emulator image, not substituted with its Google-APIs image's license-checker stub. The APK is
 kept in ignored local build output only; no Google APK is bundled or redistributed by VirtualDAP.
 
+Importing the actual Google Play Store 45.3.21-31 APK passed in **18.949 seconds**. A further
+YouTube Music screen test nevertheless **failed in 97.057 seconds**. The new logs report invalid
+Google Play services signing identity (not a missing Store), followed by
+`MeasurementServiceConnection.onServiceConnected` failing a main-thread assertion. These are
+unresolved interoperability failures; no signing check, account result or callback-thread check
+was suppressed to make the test pass. The next investigation must compare actual installed-APK
+signing metadata, including rotation history, and preserve the caller's service-dispatch semantics.
+
+### Authenticator discovery before the first account
+
+Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
+authenticator services. A fresh profile therefore returned no types even when the corresponding
+service and metadata existed. The adapter now queries this container user's actual declared
+services and parses their authenticator XML; it does not require an account to exist or borrow
+another user's/host's identities. A metadata-only fixture declares one type without creating
+accounts, accepting credentials or issuing tokens, and checks discovery through the app-facing
+`AccountManager`. This is a discovery regression, not a successful authentication session.
+This follow-up change is **not included in the published alpha 3 APK**.
+
+The unchanged fixture/test APK against the pre-fix alpha-3 debug host failed in **33.010 seconds**
+with `Declared authenticator must be discoverable without an account: 0`. Replacing only the host
+with the fix then passed all **15 runtime tests in 64.026 seconds**, including PCM capture,
+split installs, controls and Korean UI. Debug build/lint, 122 JVM tests, 15 prepared-source checks
+and the four-ABI product boundary also passed. An earlier local run ended without a result when
+the test emulator exited; host logs later recorded memory pressure. After rebooting the emulator
+with 2 GiB RAM and dismissing its boot-time System UI dialog, the explicit discovery failure
+above and subsequent full pass were recorded. Incomplete/obscured runs are not counted as passes.
+
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |

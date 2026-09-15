@@ -1,5 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="VirtualDAP music fixture" android:theme="@android:style/Theme.Material.NoActionBar">
+        <service android:name=".FixtureAuthenticatorService" android:exported="true"
+            android:permission="android.permission.BIND_ACCOUNT_AUTHENTICATOR">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/fixture_authenticator" />
+        </service>
         <service android:name=".FixturePlaybackService" android:exported="true">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />

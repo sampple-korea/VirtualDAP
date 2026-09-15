@@ -1,3 +1,4 @@
 <resources>
     <string name="fixture_feature_name">Container feature proof</string>
+    <string name="fixture_authenticator_name">Fixture authenticator discovery</string>
 </resources>

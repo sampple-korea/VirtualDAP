@@ -67,7 +67,21 @@ public final class MusicFixtureActivity extends Activity {
             if (!getPackageManager().queryIntentServices(query, 0).isEmpty()) {
                 throw new IllegalStateException("Undeclared service action returned a fabricated match");
             }
-            serviceQuery.setText("MEDIA SERVICE QUERY READY");
+            int authenticatorMatches = 0;
+            for (android.accounts.AuthenticatorDescription authenticator :
+                    android.accounts.AccountManager.get(this).getAuthenticatorTypes()) {
+                if ("com.virtualdap.fixture.discovery".equals(authenticator.type)) {
+                    if (!getPackageName().equals(authenticator.packageName)) {
+                        throw new IllegalStateException("Authenticator returned a different package");
+                    }
+                    authenticatorMatches++;
+                }
+            }
+            if (authenticatorMatches != 1) {
+                throw new IllegalStateException("Declared authenticator must be discoverable without an account: "
+                    + authenticatorMatches);
+            }
+            serviceQuery.setText("MEDIA SERVICE QUERY READY / AUTHENTICATOR DISCOVERY READY");
         } catch (RuntimeException failure) {
             serviceQuery.setText("MEDIA SERVICE QUERY ERROR: " + failure);
         }

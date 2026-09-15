@@ -12,6 +12,18 @@ APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_authenticator_discovery_does_not_require_an_existing_account(self):
+        service = (JAVA / "core/system/accounts/BAccountManagerService.java").read_text()
+        block = service.split("public AuthenticatorDescription[] getAuthenticatorTypes(int userId)", 1)[1]
+        block = block.split("@Override", 1)[0]
+        self.assertIn("mPms.queryIntentServices(", block)
+        self.assertIn("PackageManager.GET_META_DATA, userId", block)
+        self.assertIn("new RegisteredServicesParser()", block)
+        self.assertIn("info.desc", block)
+        self.assertNotIn("getUserAccounts", block)
+        self.assertNotIn("USER_ALL", block)
+        self.assertNotIn("new AuthenticatorDescription(", block)
+
     def test_current_android_new_intents_use_activity_record(self):
         thread = (JAVA / "app/BActivityThread.java").read_text()
         block = thread.split("public void handleNewIntent(", 1)[1].split("public void scheduleReceiver(", 1)[0]
