@@ -3,6 +3,28 @@
 Catalog membership is a target, not a compatibility certification. No subscription login, account
 state, DRM verdict or provider policy is bypassed. Tests use an ordinary application UID.
 
+## User-reported compatibility gap after alpha 2
+
+The user reports Apple Music opening but login and other operations loading indefinitely, and
+YouTube Music not opening, while their supplied multi-account app can open and sign in to these
+apps. These are unresolved product failures, not successes established by a welcome-screen test.
+Separately, the signed alpha 2's host-installed Apple Music import/welcome check passed locally in
+54.508 seconds. A supervised, no-account inspection reached the actual catalog after Continue,
+declining optional diagnostics and leaving explicit content disabled. This does not contradict
+the user's login failure: no credentials, subscription or music playback were tested.
+
+The supplied reference APK is `com.excelliance.multiaccounts` 5.7.8 (668), min API 23 / target 35,
+SHA-256 `c4edff2f35f7f664f13ed400c99a3cc9d78619070bf4873553964970df3be321`.
+Static interoperability inspection found an embedded runtime archive, separate core process,
+account-selection activities, a Binder account-manager interface and authenticator sessions with
+service-connection/death callbacks; Google service/framework packages are explicitly handled.
+Several implementations are native/obfuscated and the decompiler reported six errors. These
+observations do not prove their exact login mechanism or that a permission list alone is sufficient.
+The next compatibility work must verify real dependency installation, service/provider binding,
+account-authenticator discovery and asynchronous callback delivery, preserving PCM capture.
+The APK, extracted binaries and analysis output stay outside tracked source and are not bundled;
+no proprietary implementation, fabricated account/token or attestation result is imported.
+
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |
@@ -211,6 +233,12 @@ This distinguishes
 an actual app screen from the host launcher or a startup callback preceding a crash. It does not
 click login controls, submit credentials or establish playback compatibility. Choose the label for
 the app version and emulator locale being tested.
+
+For an explicitly supervised local inspection, `externalInspectionSeconds` (0–180, default 0)
+keeps the test-only paced receiver alive after the selected startup/screen check. This allows
+manual onboarding navigation before the instrumentation process exits. The wait itself is **not**
+a login, navigation or playback assertion; record the actual observed screens/errors separately.
+It neither submits credentials nor accepts agreements automatically. Normal CI does not wait.
 
 ```sh
 adb push /path/to/legitimately-obtained.apks /data/local/tmp/virtualdap-app.apks

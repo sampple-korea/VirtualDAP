@@ -59,6 +59,11 @@ class ContainerInstrumentedTest {
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == expected })
             if (InstrumentationRegistry.getArguments().getString("importOnly") == "true") return
+            val inspectionSeconds = InstrumentationRegistry.getArguments()
+                .getString("externalInspectionSeconds")?.let {
+                    requireNotNull(it.toIntOrNull()) { "Inspection duration must be a whole number of seconds" }
+                } ?: 0
+            require(inspectionSeconds in 0..180) { "Inspection duration must be between 0 and 180 seconds" }
             val externalWav = InstrumentationRegistry.getArguments().getString("externalWav") == "true"
             val evidence = ExternalWavEvidence()
             CaptureProbe(if (externalWav) evidence::observe else null).use { probe ->
@@ -104,6 +109,12 @@ class ContainerInstrumentedTest {
                         assertTrue("External app screen disappeared after initialization", visibleAppScreen())
                         SystemClock.sleep(100)
                     }
+                }
+                if (inspectionSeconds > 0) {
+                    // Explicit local inspection window only: keeps the real app and paced receiver
+                    // alive for manual navigation. Elapsed time does not certify login or playback.
+                    android.util.Log.i("VirtualDAP-Compat", "Manual inspection ready: $expected ($inspectionSeconds seconds)")
+                    SystemClock.sleep(inspectionSeconds * 1000L)
                 }
             }
             return
