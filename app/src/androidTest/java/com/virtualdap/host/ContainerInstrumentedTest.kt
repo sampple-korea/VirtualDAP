@@ -180,6 +180,11 @@ class ContainerInstrumentedTest {
                         audio.sourceFormat.encoding == encoding && audio.framesReceived >= rate
                 }
                 assertEquals(PipelineStore.state.value.toString(), 0, PipelineStore.state.value.guestDroppedBytes)
+                await("fixture reports its producer busy before another start") {
+                    instrumentation.uiAutomation.rootInActiveWindow
+                        ?.findAccessibilityNodeInfosByText(button)
+                        ?.any { it.text?.toString() == button && !it.isEnabled } == true
+                }
                 click("Mute")
                 await("application mute at host") { PipelineStore.state.value.applicationGainLeft == 0f }
                 assertEquals(false, PipelineStore.state.value.bitPerfectActive)
@@ -317,7 +322,7 @@ class ContainerInstrumentedTest {
         val ui = InstrumentationRegistry.getInstrumentation().uiAutomation
         await("fixture button '$text'") {
             val candidates = ui.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
-                ?.filter { it.isClickable }.orEmpty()
+                ?.filter { it.isClickable && it.isEnabled }.orEmpty()
             val selected = candidates.firstOrNull { it.text?.toString()?.equals(text, ignoreCase = true) == true }
                 ?: candidates.singleOrNull()
             selected?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true

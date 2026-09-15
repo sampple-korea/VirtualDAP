@@ -24,7 +24,9 @@ public final class MusicFixtureActivity extends Activity {
     private static native String rejectUnsupportedNative();
 
     private volatile boolean playing;
-    private Thread audioThread;
+    // Main-thread state: socket closure can precede the worker's final resource release.
+    private boolean playbackBusy;
+    private final java.util.List<Button> playbackButtons = new java.util.ArrayList<>();
     private volatile AudioTrack activeTrack;
     private volatile boolean stopFirstTrack;
     private TextView status;
@@ -126,6 +128,8 @@ public final class MusicFixtureActivity extends Activity {
         unsupported.setText("Check unsupported output rejection");
         unsupported.setOnClickListener(view -> checkUnsupportedOutput());
         content.addView(unsupported);
+        playbackButtons.addAll(java.util.Arrays.asList(
+            pcm16, pcmFloat, pcmStatic, aaudio, aaudioBlocking, openSl, overlap, unsupported));
         status = new TextView(this);
         status.setText("Idle");
         content.addView(status);
@@ -142,7 +146,7 @@ public final class MusicFixtureActivity extends Activity {
     }
 
     private void checkUnsupportedOutput() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         try {
             AudioTrack track = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
@@ -173,10 +177,28 @@ public final class MusicFixtureActivity extends Activity {
         }
     }
 
+    private void startAudioWorker(Runnable playback, String name) {
+        playbackBusy = true;
+        for (Button button : playbackButtons) button.setEnabled(false);
+        new Thread(() -> {
+            try {
+                playback.run();
+            } finally {
+                // Publish readiness only after the producer's finally block (including release).
+                runOnUiThread(() -> {
+                    playbackBusy = false;
+                    if (!isDestroyed()) {
+                        for (Button button : playbackButtons) button.setEnabled(true);
+                    }
+                });
+            }
+        }, name).start();
+    }
+
     private void play(int sampleRate, boolean floating) {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             AudioTrack track = null;
             try {
                 int encoding = floating ? AudioFormat.ENCODING_PCM_FLOAT : AudioFormat.ENCODING_PCM_16BIT;
@@ -229,7 +251,6 @@ public final class MusicFixtureActivity extends Activity {
                 if (track != null) track.release();
             }
         }, "VirtualDAP-fixture-PCM");
-        audioThread.start();
     }
 
     private static AudioTrack stream(int rate, int encoding, int frameBytes) {
@@ -246,9 +267,9 @@ public final class MusicFixtureActivity extends Activity {
     }
 
     private void playStatic() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             AudioTrack track = null;
             try {
                 final int rate = 44100;
@@ -302,13 +323,12 @@ public final class MusicFixtureActivity extends Activity {
                 if (track != null) track.release();
             }
         }, "VirtualDAP-fixture-static");
-        audioThread.start();
     }
 
     private void playAaudio() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             try {
                 String result = playAaudioNative();
                 runOnUiThread(() -> status.setText(result));
@@ -318,13 +338,12 @@ public final class MusicFixtureActivity extends Activity {
                 playing = false;
             }
         }, "VirtualDAP-fixture-AAudio");
-        audioThread.start();
     }
 
     private void playAaudioBlocking() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             try {
                 String result = playAaudioBlockingNative();
                 runOnUiThread(() -> status.setText(result));
@@ -334,13 +353,12 @@ public final class MusicFixtureActivity extends Activity {
                 playing = false;
             }
         }, "VirtualDAP-fixture-AAudio-write");
-        audioThread.start();
     }
 
     private void playOpenSl() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             try {
                 String result = playOpenSlNative();
                 runOnUiThread(() -> status.setText(result));
@@ -350,14 +368,13 @@ public final class MusicFixtureActivity extends Activity {
                 playing = false;
             }
         }, "VirtualDAP-fixture-OpenSL");
-        audioThread.start();
     }
 
     private void playOverlap() {
-        if (audioThread != null && audioThread.isAlive()) return;
+        if (playbackBusy) return;
         playing = true;
         stopFirstTrack = false;
-        audioThread = new Thread(() -> {
+        startAudioWorker(() -> {
             AudioTrack first = null, second = null;
             try {
                 first = stream(48000, AudioFormat.ENCODING_PCM_16BIT, 4);
@@ -398,7 +415,6 @@ public final class MusicFixtureActivity extends Activity {
                 if (second != null) second.release();
             }
         }, "VirtualDAP-fixture-overlap");
-        audioThread.start();
     }
 
     @Override public void onDestroy() {

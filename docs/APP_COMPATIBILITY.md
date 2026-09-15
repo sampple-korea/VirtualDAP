@@ -51,6 +51,21 @@ in 50.354 seconds after these test changes; the CI matrix must be checked indepe
 Run `34837159352` subsequently passed the host debug/release build and both API 34/36 runtime jobs
 for commit `3e1c045`.
 
+## Subsequent CI reliability check
+
+After release, documentation-only commit `bd21a32` passed the host and API 36 jobs in run
+`34933502548`, but API 34 failed while waiting for 96 kHz float capture (15 tests, one failure).
+The log recorded the preceding 48 kHz track, but no subsequent 96 kHz track creation. This is
+not a passing run and does not change the recorded result of the earlier release-commit run.
+
+Inspection found a race in the fixture: capture socket closure was observable before its producer
+thread finished releasing resources, while the next Play handler silently ignored requests until
+`Thread.isAlive()` became false. The fixture now disables its start buttons during playback and
+publishes readiness on the UI thread only after the producer's cleanup. Instrumentation waits for
+an enabled button before clicking and checks the busy state during playback. This addresses a
+concrete test-app race consistent with the failure; it does not establish a production USB fix or
+commercial-app compatibility. Subsequent runtime results must be checked independently.
+
 ## Real account and package results
 
 The consumer-source preparation excludes the synthetic authentication/account adapters: fabricated
