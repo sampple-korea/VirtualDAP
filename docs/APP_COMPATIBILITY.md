@@ -45,7 +45,16 @@ The same installed debug host passed all **15 ordinary-UID API 36 regression tes
 seconds**, including genuine split/APKS installs and PCM capture. Debug build/lint, **122 JVM
 tests** and **14 prepared-source checks** passed. The earlier USB AudioControl ownership fix
 also passed GitHub run `35002284364` (host and API 34/36) at `259e090`; that run does not include
-this later archive-classification change. Neither change is in the published alpha 2 APK.
+this later archive-classification change. Both changes are included in the published alpha 3 APK;
+its exact release commit passed GitHub run `35007733625` and 15 signed-release runtime tests.
+
+The subsequent YouTube Music 8.09.50 screen check with real GMS/GSF installed **failed** after
+97.164 seconds: no stable visible `Sign in` screen. Its logs explicitly report that the Google
+Play Store is missing and service availability error 9. The container did initialize GMS
+processes, but neither initialization nor installing these two dependencies established login.
+For the next check, the actual `Phonesky.apk` was obtained from the official API 36 Google Play
+emulator image, not substituted with its Google-APIs image's license-checker stub. The APK is
+kept in ignored local build output only; no Google APK is bundled or redistributed by VirtualDAP.
 
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |

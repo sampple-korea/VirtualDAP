@@ -4,7 +4,28 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
-## Published limited alpha 2
+## Published limited alpha 3
+
+`v0.1.0-alpha.3` is a public **prerelease** from
+`adb7a3a4f789a3c69b81053d165c6dcb9980412c`. The
+[release](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.3) contains only
+the installable APK and `SHA256SUMS`.
+
+- APK SHA-256: `32836729e3e54f8169624bb01e660a60ee975d166e5391545095a66ac12969e3`;
+  size 63,937,990 bytes, version code 3. The signing certificate is unchanged from alpha 1/2.
+- An ordinary update install over the actual public alpha 2 succeeded without uninstalling or
+  clearing its data. The signed, non-debuggable release APK passed **15 tests in 115.942 seconds**
+  on the ordinary-UID API 36 emulator. The separately signed instrumentation APK is not published.
+- Signature, minimum API 34, `debuggable=false`, 16 KB ZIP alignment and four-ABI USB/license/
+  retired-code checks passed. Local release build/lint and **122 JVM tests** passed (6m 31s).
+- Exact-commit GitHub run `35007733625` passed the host build and both API 34/36 runtime jobs.
+  The preceding classifier-only run was cancelled by the release-preparation push; it is not
+  counted as a separate passing run.
+- UAC2 AudioControl ownership and error diagnostics address concrete omissions behind the user's
+  failed clock negotiation. Physical FreeDSP output is not yet verified. Apple Music login and
+  usable YouTube Music sessions remain unresolved, as the release notes explicitly state.
+
+## Historical limited alpha 2
 
 `v0.1.0-alpha.2` was published as a **prerelease**, not stable, on September 15, 2026,
 from commit `2e22a46e1e5517cd263b52ac9224b7539df2271d`.
