@@ -14,3 +14,14 @@ historical; official Android bit-perfect output remains a separately selected ad
 
 Permission lifecycle, output ownership, disconnect, format negotiation and UI disclosures remain
 release checks. Automatic fallback between USB and official output is forbidden.
+
+PCM negotiation checks all compatible alternate settings for source-preserving playback before
+trying same-rate/channel packing conversion, and checks those before rate/channel conversion.
+An early alternate rejecting the requested clock must not cause resampling when another alternate
+accepts the original samples. UAC2 clock-range discovery follows the same ordering. Conversion
+candidates and unusable profiles are cached only for the current configuration attempt; actual
+clock acceptance is still verified when starting each candidate.
+
+The regression suite covers both a rejected 96 kHz UAC1 clock with another exact alternate and
+UAC2 range discovery where an earlier alternate exposes only 48 kHz. These simulated transports
+exercise negotiation and PCM packing, not physical DAC compatibility.

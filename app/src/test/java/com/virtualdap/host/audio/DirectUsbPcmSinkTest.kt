@@ -24,8 +24,11 @@ class DirectUsbPcmSinkTest {
         var error = 0
         var drains = 0
         var rejectClock = false
+        var rejectedRates = emptySet<Int>()
         override fun start(sampleRate: Int) {
-            check(profile.rates.any { it.contains(sampleRate) } && !rejectClock) { "USB clock rejected the rate" }
+            check(profile.rates.any { it.contains(sampleRate) } && !rejectClock && sampleRate !in rejectedRates) {
+                "USB clock rejected the rate"
+            }
             started = true
             startedRate = sampleRate
         }
@@ -36,7 +39,18 @@ class DirectUsbPcmSinkTest {
             this.bytes.write(bytes, 0, count)
             return count
         }
-        override fun control(type: Int, request: Int, value: Int, index: Int, bytes: ByteArray): Int = kotlin.error("unused")
+        override fun control(type: Int, request: Int, value: Int, index: Int, bytes: ByteArray): Int {
+            check(profile.protocol == 0x20)
+            assertEquals(0xa1, type)
+            assertEquals(2, request)
+            assertEquals(0x100, value)
+            assertEquals((requireNotNull(profile.clockEntity) shl 8) or profile.controlInterface, index)
+            val ranges = java.nio.ByteBuffer.allocate(2 + 12 * profile.rates.size)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN).putShort(profile.rates.size.toShort())
+            profile.rates.forEach { ranges.putInt(it.minimum).putInt(it.maximum).putInt(it.resolution) }
+            ranges.array().copyInto(bytes, endIndex = bytes.size)
+            return bytes.size
+        }
         override fun pause() { paused = true }
         override fun resume() { paused = false }
         override fun flush() { check(paused); bytes.reset() }
@@ -181,5 +195,52 @@ class DirectUsbPcmSinkTest {
         assertEquals(listOf(exact, fallback), selected)
         assertTrue(transports.all { it.closed })
         assertEquals(2, releases)
+    }
+
+    @Test fun allSourcePreservingAlternatesAreTriedBeforeAnyResampling() {
+        verifySourcePreservingAlternate(uac2 = false)
+    }
+
+    @Test fun uac2ClockDiscoveryDoesNotChooseConversionBeforeCheckingOtherAlternates() {
+        verifySourcePreservingAlternate(uac2 = true)
+    }
+
+    private fun verifySourcePreservingAlternate(uac2: Boolean) {
+        val base = profile.copy(protocol = if (uac2) 0x20 else 0, clockEntity = if (uac2) 10 else null)
+        val preferred = base.copy(rates = if (uac2) listOf(UsbSampleRateRange(48_000, 48_000))
+            else listOf(UsbSampleRateRange(48_000, 48_000), UsbSampleRateRange(96_000, 96_000)))
+        val wider = base.copy(alternateSetting = 2, bitResolution = 32,
+            rates = listOf(UsbSampleRateRange(96_000, 96_000)))
+        val transports = mutableListOf<Transport>()
+        val started = mutableListOf<Pair<Int, Int>>()
+        var resamplers = 0
+        var releases = 0
+        val sink = DirectUsbPcmSink(42, route, { _, _, _ ->
+            resamplers++
+            PassthroughResampler()
+        }) { _, choose ->
+            val chosen = choose(listOf(preferred, wider))
+            val transport = Transport(chosen).apply {
+                if (chosen == preferred) rejectedRates = setOf(96_000)
+            }
+            transports += transport
+            UsbHostController.DirectConnection(transport) {
+                transport.startedRate?.let { started += chosen.alternateSetting to it }
+                releases++
+            }
+        }
+        sink.use {
+            val source = PcmFormat(96_000, 2, PcmEncoding.PCM_24_PACKED)
+            val configured = it.configure(source)
+            assertEquals(96_000, configured.configured.sampleRate)
+            assertTrue(configured.sourcePreserved)
+            assertEquals(0, resamplers)
+            val input = ByteArray(60) { index -> (index * 7).toByte() }
+            it.write(input)
+            assertArrayEquals(UsbPcmPacking(source, wider).pack(input), transports.last().bytes.toByteArray())
+        }
+        assertEquals(listOf(2 to 96_000), started)
+        assertTrue(transports.all { it.closed })
+        assertEquals(transports.size, releases)
     }
 }

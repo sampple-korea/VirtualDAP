@@ -16,6 +16,14 @@ data class DirectUsbPcmCandidate(
  * UAC2 clock ranges can be queried through the already-permitted device before playback starts.
  */
 object DirectUsbPcmPlanner {
+    /** Compare quality across every alternate, not just within the first usable interface. */
+    fun conversionTier(source: PcmFormat, candidate: DirectUsbPcmCandidate): Int = when {
+        candidate.inputFormat == source && UsbPcmPacking(source, candidate.profile).preservesSource -> 0
+        candidate.inputFormat.sampleRate == source.sampleRate &&
+            candidate.inputFormat.channelCount == source.channelCount -> 1
+        else -> 2
+    }
+
     private val commonRates = listOf(
         8_000, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000,
         44_100, 48_000, 64_000, 88_200, 96_000, 128_000,
