@@ -25,6 +25,28 @@ account-authenticator discovery and asynchronous callback delivery, preserving P
 The APK, extracted binaries and analysis output stay outside tracked source and are not bundled;
 no proprietary implementation, fabricated account/token or attestation result is imported.
 
+### Embedded APK modules and real service-package import
+
+The first import of this API 36 emulator's actual Google Play services APK failed with
+`APK set contains multiple base APKs`. The container's archive classifier counted APK modules
+inside an otherwise normal APK as an outer install bundle. The classifier now gives the root
+`AndroidManifest.xml` precedence over both embedded `.apk` entries and the filename extension.
+Outer bundles still use the existing split/identity/signature validation; this is not a parser
+or signature bypass. Four JVM cases cover real-APK structure, misleading names, a one-APK
+outer archive and a non-APK archive.
+
+After the fix, copying only the emulator's Google Play services APK into the container passed
+the import-only check in **47.372 seconds**. Its Google Services Framework APK had separately
+passed import in **10.831 seconds**. No account data, system privileges or permissions were
+copied. This does not establish that those services start or can authenticate a user; the
+emulator's `com.android.vending` is a license-checker stub, not a complete Play Store.
+
+The same installed debug host passed all **15 ordinary-UID API 36 regression tests in 66.006
+seconds**, including genuine split/APKS installs and PCM capture. Debug build/lint, **122 JVM
+tests** and **14 prepared-source checks** passed. The earlier USB AudioControl ownership fix
+also passed GitHub run `35002284364` (host and API 34/36) at `259e090`; that run does not include
+this later archive-classification change. Neither change is in the published alpha 2 APK.
+
 | Package/build | Environment | Installation | Application start | Captured playback |
 | --- | --- | --- | --- | --- |
 | VirtualDAP fixture, source-built debug | Historical baseline: API 33 AOSP x86_64; API 36 Google APIs x86_64 | Verified base, signed feature split update, device-targeted binary-`toc.pb` APKS, and official bundletool 1.18.3 APKS probe | Verified, including feature-only class | Java streaming/static PCM, AAudio callback/write, OpenSL ES buffer queue, prebuffer/pause/resume/volume, two overlapping streams and individual release |

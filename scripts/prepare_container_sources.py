@@ -237,6 +237,13 @@ def prepare(upstream, dobby, overrides, output):
 
     manager = package / "core/system/pm/BPackageManagerService.java"
     content = manager.read_text(encoding="utf-8")
+    begin = content.index("    private static boolean isApksBundle(File file) {")
+    end = content.index("    private static List<File> extractApksBundle", begin)
+    content = content[:begin] + (
+        "    private static boolean isApksBundle(File file) {\n"
+        "        return top.niunaijun.blackbox.utils.ApkArchiveType.isBundle(file);\n"
+        "    }\n\n"
+    ) + content[end:]
     content = replace_once(
         content, "        List<File> selectedSplits = null;",
         "        File parseInput = null;\n        String selectedAbi = null;",

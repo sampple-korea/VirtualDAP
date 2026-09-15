@@ -124,6 +124,8 @@ class PreparedContainerTests(unittest.TestCase):
 
     def test_split_clusters_and_atomic_install_are_used(self):
         manager = (JAVA / "core/system/pm/BPackageManagerService.java").read_text()
+        self.assertIn("ApkArchiveType.isBundle(file)", manager)
+        self.assertNotIn("apkCount >= 2", manager)
         self.assertIn("ApkBundle.plan(files)", manager)
         self.assertIn("parserApk(parseInput.getAbsolutePath())", manager)
         self.assertNotIn("selectSplitApks(", manager)
