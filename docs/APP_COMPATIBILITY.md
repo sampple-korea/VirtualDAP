@@ -9,7 +9,8 @@ state, DRM verdict or provider policy is bypassed. Tests use an ordinary applica
 | VirtualDAP fixture, API 34 minimum / official-output build | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified base, split update and device-targeted APKS | Verified, including feature-only class | Paced test receiver: Java streaming/static, AAudio callback/write, OpenSL ES, controls, overlapping capture and individual release; **not DAC output** |
 | YouTube Music 8.09.50, version code 80950280, x86_64 | API 36 Google APIs x86_64, ordinary UID; September 14, 2026 | Verified copying the installed host base/split package into the container | Application.onCreate callback verified; subsequent visible sign-in-screen check **fails** | Not tested; login, DRM, UI navigation and music playback remain unverified |
 | foobar2000 mobile 2.25.9, version code 1093, official x86_64 APK | API 36 Google APIs x86_64, ordinary UID | Verified APK import | Application.onCreate, welcome screen and completed ordinary onboarding | Generated WAV: captured 48 kHz / stereo / PCM16 from the app PID; left 440 Hz and right 660 Hz signals verified at the paced test receiver; **not DAC output** |
-| Apple Music, Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
+| Apple Music 6.5.2, version code 1586, publisher-listed Android APK | API 36 Google APIs x86_64, ordinary UID; September 15, 2026 | Verified APK import | Stable welcome screen passed after fixing media-service discovery; earlier startup crash recorded below | Not tested; login and subscription playback unverified |
+| Spotify and remaining catalog services | — | Not yet verified | Not yet verified | Not yet verified |
 
 The current minimum is API 34. USB audio is now the default product mode, with official bit-perfect
 as an explicitly selected advanced mode. Earlier results below describe the official-only builds
@@ -52,6 +53,10 @@ Run `34837159352` subsequently passed the host debug/release build and both API 
 for commit `3e1c045`.
 
 ## Subsequent CI reliability check
+
+GitHub run `34945887250` passed the host build and API 34/36 runtime jobs for `7c87ba3`,
+including the USB source-preserving alternate selection and corrected fixture-readiness checks.
+This result precedes the media-service query and Korean notification changes below.
 
 After release, documentation-only commit `bd21a32` passed the host and API 36 jobs in run
 `34933502548`, but API 34 failed while waiting for 96 kHz float capture (15 tests, one failure).
@@ -117,6 +122,41 @@ After the stop-state reduction and regression tests were added, the local debug 
 103 JVM tests and all 12 API 36 instrumentation tests passed (48.739 seconds for instrumentation).
 
 ## Optional local compatibility smoke
+
+### Apple Music media-service discovery
+
+The Apple support article `support.apple.com/en-us/109340` links to the Android distribution at
+`sj.qq.com/appdetail/com.apple.android.music`. On September 15, 2026 its mobile download response
+provided Apple Music 6.5.2, version code 1586, minimum API 30, target API 35, with all four ABIs.
+The 205,338,559-byte APK matched that listing's MD5 `339074e43d51af1d2959e81ba2c985fc`;
+APK signature verification passed with certificate SHA-256
+`88ba590ec2e1ea33c4458daf59489faee2cef297a9b4071e18cf82ef531100aa`.
+APK SHA-256: `a05a36a5678015fd49d8c73aed2087e7a2f8f3232376733a2cf2f82623895736`.
+The unmodified APK is local test input only, not bundled or redistributed.
+
+Import/initialization passed in 52.765 seconds (the class's two tests). The subsequent visible
+`Continue` screen check failed in 40.774 seconds: the welcome screen appeared, then the process
+threw `Failed to resolve SessionToken` for its declared `MediaPlaybackService`. No account was
+entered and no subscription or music playback was attempted.
+
+Inspection found that the pinned container exposed a service-query implementation internally
+but did not route Android's `queryIntentServices` call into it. The adapter now returns real
+parsed container records for the target package; queries outside the container keep Android's
+normal host visibility/permissions. It does not invent service entries or alter app signatures.
+A fixture declares a real browser service and checks both its discovery and an empty result
+for an undeclared action. After installing the service-query fix, the same unmodified Apple Music
+APK passed the visible `Continue`-screen check in **99.9 seconds**. That check requires a real
+resumed activity, live process, visible non-password label and three seconds of screen stability.
+This proves only the welcome-screen stage, not acceptance of onboarding, sign-in, media playback,
+or PCM/DAC output. The full fixture/runtime suite remains a separate check.
+
+The combined changes also localize the audio notification channel, controls and playback states
+in Korean without changing transport selection. Debug/test APK assembly, lint, the 116 JVM tests,
+14 prepared-source checks and the packaged-output boundary passed locally. The first full local
+API 36 run failed two screen checks while a system-process ANR dialog covered the application;
+the notification/error-state tests passed. A second attempt was interrupted after the system
+dialog recurred, and the emulator was rebooted without clearing app data. Neither attempt is a
+passing full-suite result; a clean runtime rerun and the commit's CI matrix are still required.
 
 ### Current Android intent delivery and independent-player PCM
 

@@ -152,6 +152,13 @@ class ContainerInstrumentedTest {
             }
             assertEquals("A new intent must not replace the existing activity instance", firstActivity,
                 ContainerRuntime.state.value.foregroundActivity)
+            await("declared media service query inside the container") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")
+                    ?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY READY")?.isNotEmpty() == true
+            }
             click("Check unsupported output rejection")
             await("ordinary-UID MediaRouter2 discovery") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow

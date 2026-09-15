@@ -98,6 +98,16 @@ class PreparedContainerTests(unittest.TestCase):
         self.assertIn("art_method_size > 256", jni)
         self.assertIn("GetArtMethod(env, clazz, method, is_static)", jni)
 
+    def test_media_service_queries_use_real_container_records(self):
+        proxy = (JAVA / "fake/service/IPackageManagerProxy.java").read_text()
+        query = (JAVA / "fake/service/ContainerServiceQueryHook.java").read_text()
+        self.assertIn("addMethodHook(new ContainerServiceQueryHook())", proxy)
+        self.assertIn(".queryIntentServices(intent, flags, user)", query)
+        self.assertIn("MethodParameterUtils.toInt(args[2])", query)
+        self.assertIn("if (!containerTarget)", query)
+        self.assertIn("method.invoke(who, args)", query)
+        self.assertNotIn("new ResolveInfo", query)
+
     def test_license_notices_are_bundled(self):
         for name in ("blackbox", "dobby"):
             self.assertGreater((PREPARED / ("assets/notices/" + name + "-LICENSE.txt")).stat().st_size, 500)

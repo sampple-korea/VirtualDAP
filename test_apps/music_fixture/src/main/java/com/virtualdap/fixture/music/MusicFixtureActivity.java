@@ -54,6 +54,24 @@ public final class MusicFixtureActivity extends Activity {
             mediaRoutes.setText("MEDIA ROUTER ERROR: " + failure);
         }
         content.addView(mediaRoutes);
+        TextView serviceQuery = new TextView(this);
+        try {
+            android.content.Intent query = new android.content.Intent("android.media.browse.MediaBrowserService")
+                .setPackage(getPackageName());
+            java.util.List<android.content.pm.ResolveInfo> services = getPackageManager().queryIntentServices(
+                query, android.content.pm.PackageManager.ResolveInfoFlags.of(0));
+            if (services.size() != 1 || !services.get(0).serviceInfo.name.equals(FixturePlaybackService.class.getName())) {
+                throw new IllegalStateException("Missing declared media service: " + services);
+            }
+            query.setAction("com.virtualdap.fixture.MISSING_SERVICE");
+            if (!getPackageManager().queryIntentServices(query, 0).isEmpty()) {
+                throw new IllegalStateException("Undeclared service action returned a fabricated match");
+            }
+            serviceQuery.setText("MEDIA SERVICE QUERY READY");
+        } catch (RuntimeException failure) {
+            serviceQuery.setText("MEDIA SERVICE QUERY ERROR: " + failure);
+        }
+        content.addView(serviceQuery);
         TextView feature = new TextView(this);
         try {
             feature.setText((String) Class.forName("com.virtualdap.fixture.feature.FeatureMarker")

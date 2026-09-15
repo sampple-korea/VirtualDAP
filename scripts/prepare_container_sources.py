@@ -142,6 +142,10 @@ def prepare(upstream, dobby, overrides, output):
 
     package_proxy = package / "fake/service/IPackageManagerProxy.java"
     content = package_proxy.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "    protected void onBindMethod() {\n        super.onBindMethod();",
+        "    protected void onBindMethod() {\n        super.onBindMethod();\n"
+        "        addMethodHook(new ContainerServiceQueryHook());")
     start = content.index('    @ProxyMethod("getPackageInfo")')
     end = content.index('    @ProxyMethod("getPackageUid")', start)
     content = content[:start] + '''    @ProxyMethod("getPackageInfo")
