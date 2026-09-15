@@ -6,6 +6,15 @@ music apps; diagnostics, output tone and local DSD live in the compact Tools men
 The latest user decisions and remaining completion evidence are recorded in
 [product requirements](docs/PRODUCT_REQUIREMENTS.md).
 
+## APK 다운로드 · 알파 버전
+
+[VirtualDAP 0.1.0-alpha.1 APK 다운로드](https://github.com/sampple-korea/VirtualDAP/releases/download/v0.1.0-alpha.1/VirtualDAP-0.1.0-alpha.1.apk)
+· [설치 안내와 제한 사항](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.1)
+
+Android 14 이상, 루팅 불필요. 기본 USB 출력과 한국어 음악 앱 중심 화면을 제공하는 초기 공개 테스트입니다.
+Apple Music·Spotify 등 모든 음악 서비스의 로그인·재생이나 실제 DAC 호환성이 검증된 완성판은 아닙니다.
+기존 개발용 APK와 서명이 다르면 업데이트 설치가 안 될 수 있으며, 삭제 시 내부 앱·계정 데이터가 지워집니다.
+
 The container shares the device's Android framework. It supports APK and compatible split-package
 imports, separate app data, app launch/stop, and Java AudioTrack, native AAudio and OpenSL ES PCM
 capture. See [capture scope](docs/CONTAINER_AUDIO.md) and [installation](docs/CONTAINER_INSTALLATION.md).
@@ -59,6 +68,6 @@ official-output rejection tests. The receiver emits no sound and is not hardware
 The Tools tone uses the selected output mode and does not certify the music-app capture path.
 Physical DAC validation is outside the current test scope.
 
-A downloadable signed APK will be published through GitHub Releases once the usable scope is
-verified. See [release readiness](docs/RELEASE_READINESS.md); development test results do not imply
-that commercial-service login or music playback is already verified.
+A signed, limited alpha is available above. See [release evidence and future gates](docs/RELEASE_READINESS.md);
+fixture and independent local-player results do not imply commercial-service login or subscription
+playback is verified.

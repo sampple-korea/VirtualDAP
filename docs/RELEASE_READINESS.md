@@ -4,6 +4,32 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+## Published limited alpha
+
+`v0.1.0-alpha.1` was published as a **prerelease**, not stable, on September 15, 2026,
+from commit `859997af68a35b4aea535f3ada7ff179049a9997`.
+The [release](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.1) contains
+only the installable release APK and `SHA256SUMS`, not test APKs, keys or personal data.
+
+- APK SHA-256: `578ec249a4de03d4401f47a8af4fca391df99d157214de40aac76000851eb24d`.
+- Signing certificate SHA-256: `273e0baf37614f54c634bd9cf7ae16826e7b2e2a38a7181a15db3ebd5c1b7c60`.
+- APK signature verified, minimum API 34, `debuggable=false`, version `0.1.0-alpha.1`.
+  Four-ABI USB/library-license and retired-code checks passed, as did 16 KB ZIP alignment.
+- GitHub run `34899873829`: host debug/release build/lint and API 34/36 ordinary-UID runtime passed.
+- Local debug/release build/lint and 114 JVM tests passed. The actual release APK was installed
+  in a separate API 36 emulator; all 15 instrumentation tests passed in **55.004 seconds**.
+  The test APK was signed with the same identity solely for local instrumentation; it is not distributed.
+- Earlier release-APK attempts were not counted as passes: an emulator Google Play services ANR
+  obscured two UI checks, and a later boot-time startup ANR killed instrumentation before test discovery.
+  After ordinary app launch and emulator startup settled, the identical APK passed the full suite.
+- The independent-player PCM signal check is documented in [app evidence](APP_COMPATIBILITY.md).
+  Physical USB/DAC playback and broad music-service compatibility remain unverified.
+
+The release notes explicitly state the supported scope, missing overlapping-output support,
+USB limitations and installation/signature/data-loss cautions. The broader final objective remains open.
+
+## Historical unsigned checks and future release gates
+
 CI also builds and lints the unsigned release variant and checks its API 34 minimum,
 non-debuggable manifest and product-output boundary. This validates packaging only; the unsigned
 file is not published as an installable release. The same checks passed locally on September 14,
