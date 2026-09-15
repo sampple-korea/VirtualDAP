@@ -58,6 +58,14 @@ class ContainerInstrumentedTest {
             assertEquals(ContainerRuntime.state.value.toString(), null, ContainerRuntime.state.value.lastError)
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == expected })
+            val originalArchive = if (hostPackage != null) {
+                File(context.packageManager.getApplicationInfo(hostPackage, 0).sourceDir)
+            } else File(context.cacheDir, requireNotNull(externalName))
+            // APK-set signing is checked during split planning; a standalone base APK also
+            // permits a direct comparison with Android's own current/history metadata.
+            if (ZipFile(originalArchive).use { it.getEntry("AndroidManifest.xml") != null }) {
+                verifyInstalledSigning(originalArchive, expected)
+            }
             if (InstrumentationRegistry.getArguments().getString("importOnly") == "true") return
             val inspectionSeconds = InstrumentationRegistry.getArguments()
                 .getString("externalInspectionSeconds")?.let {
@@ -129,6 +137,7 @@ class ContainerInstrumentedTest {
             await("fixture installation") { ContainerRuntime.state.value.phase != ContainerPhase.INSTALLING }
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == FIXTURE })
+            verifyInstalledSigning(fixture, FIXTURE)
             // No output has been started: report the real prerequisite, not a fake app timeout.
             ContainerRuntime.launch(FIXTURE)
             await("unsupported output prerequisite") {
@@ -369,6 +378,24 @@ class ContainerInstrumentedTest {
         } finally {
             AtomicPackagePublisher.deleteStaging(root)
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun verifyInstalledSigning(originalArchive: File, packageName: String) {
+        val manager = InstrumentationRegistry.getInstrumentation().targetContext.packageManager
+        val flags = android.content.pm.PackageManager.GET_SIGNATURES or
+            android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+        val original = requireNotNull(manager.getPackageArchiveInfo(originalArchive.path, flags))
+        assertEquals(packageName, original.packageName)
+        val installed = requireNotNull(top.niunaijun.blackbox.BlackBoxCore.getBPackageManager()
+            .getPackageInfo(packageName, flags, 0))
+        org.junit.Assert.assertArrayEquals("Legacy signing identity must match the imported APK",
+            original.signatures, installed.signatures)
+        org.junit.Assert.assertArrayEquals("Current signers must match the imported APK",
+            requireNotNull(original.signingInfo).apkContentsSigners,
+            requireNotNull(installed.signingInfo).apkContentsSigners)
+        org.junit.Assert.assertArrayEquals("Signing history must match the imported APK",
+            original.signingInfo!!.signingCertificateHistory, installed.signingInfo!!.signingCertificateHistory)
     }
 
     private fun await(operation: String, condition: () -> Boolean) {

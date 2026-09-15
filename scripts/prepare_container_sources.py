@@ -347,6 +347,12 @@ def prepare(upstream, dobby, overrides, output):
         "                BRApplicationInfoL.get(ai)._set_primaryCpuAbi(Build.SUPPORTED_ABIS[0]);\n"
         "            }",
     )
+    begin = content.index("        PackageInfo base = null;")
+    end = content.index("        return pi;", begin)
+    content = content[:begin] + (
+        "        InstalledPackageSigning.populate(BlackBoxCore.getContext().getPackageManager(),\n"
+        "                p.baseCodePath, pi, flags);\n"
+    ) + content[end:]
     pm_compat.write_text(content, encoding="utf-8")
     package_record = package / "core/system/pm/BPackage.java"
     content = package_record.read_text(encoding="utf-8")

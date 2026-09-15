@@ -64,6 +64,25 @@ unresolved interoperability failures; no signing check, account result or callba
 was suppressed to make the test pass. The next investigation must compare actual installed-APK
 signing metadata, including rotation history, and preserve the caller's service-dispatch semantics.
 
+### Imported-package signing metadata
+
+Package information previously borrowed certificates from a same-named host package, or
+constructed incomplete signing details when the host package was absent. It now obtains
+requested legacy signatures and current/rotation metadata from Android's parser for the
+actual imported base APK. A missing or mismatched archive fails closed; install/update
+signature verification is unchanged. This matters in particular when the host has a Store
+stub instead of the imported Store, or a different version of a rotated signing identity.
+No certificates, verification results or account identities are fabricated.
+
+The API 36 ordinary-UID regression suite passed **17 tests in 140.291 seconds**. A separate
+real Google Play services import compared its legacy/current/history metadata against the
+platform parser and passed in **21.289 seconds**. Debug build/lint, **122 JVM tests** and
+**16 prepared-source checks** passed. Nevertheless, the subsequent YouTube Music screen
+check **failed in 94.927 seconds**, still reporting invalid GMS signing identity and the
+service-callback main-thread assertion. Correct package metadata alone did not resolve
+that application's startup. Neither this fix nor the authenticator discovery below is
+included in the published alpha 3 APK.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed

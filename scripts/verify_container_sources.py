@@ -134,6 +134,19 @@ class PreparedContainerTests(unittest.TestCase):
         package_record = (JAVA / "core/system/pm/BPackage.java").read_text()
         self.assertNotIn("this.signatures = signingDetails.pastSigningCertificates", package_record)
 
+    def test_reported_signing_identity_comes_from_the_installed_archive(self):
+        compat = (JAVA / "core/system/pm/PackageManagerCompat.java").read_text()
+        self.assertIn("InstalledPackageSigning.populate(", compat)
+        self.assertIn("p.baseCodePath, pi, flags", compat)
+        self.assertNotIn("getPackageInfo(p.packageName, flags)", compat)
+        self.assertNotIn("PackageParser.SigningDetails.UNKNOWN", compat)
+        helper = (JAVA / "core/system/pm/InstalledPackageSigning.java").read_text()
+        self.assertIn("getPackageArchiveInfo(archivePath, requested)", helper)
+        self.assertIn("target.packageName.equals(archive.packageName)", helper)
+        self.assertIn("archive.signatures.clone()", helper)
+        self.assertIn("new SigningInfo(archive.signingInfo)", helper)
+        self.assertNotIn("catch", helper)
+
     def test_split_clusters_and_atomic_install_are_used(self):
         manager = (JAVA / "core/system/pm/BPackageManagerService.java").read_text()
         self.assertIn("ApkArchiveType.isBundle(file)", manager)
