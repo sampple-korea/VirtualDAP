@@ -66,6 +66,15 @@ an enabled button before clicking and checks the busy state during playback. Thi
 concrete test-app race consistent with the failure; it does not establish a production USB fix or
 commercial-app compatibility. Subsequent runtime results must be checked independently.
 
+The first local rerun was obscured by an emulator System UI startup ANR and failed two screen
+checks. After dismissing that system dialog, the new busy-state assertion exposed a test-label
+comparison error: Android's button text transformation was not handled consistently with the
+existing click helper. The busy assertion now uses the same case-insensitive exact-label check;
+it still requires the button to be disabled. The subsequent full local API 36 run passed all
+15 tests in **79.987 seconds**, including both PCM formats, producer readiness, native capture,
+split update and Korean home. Debug/test APK build and lint passed; the USB change passed
+116 JVM tests, including UAC1/UAC2 alternate-selection regressions. None is a physical USB test.
+
 ## Real account and package results
 
 The consumer-source preparation excludes the synthetic authentication/account adapters: fabricated

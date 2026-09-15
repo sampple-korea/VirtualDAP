@@ -183,7 +183,7 @@ class ContainerInstrumentedTest {
                 await("fixture reports its producer busy before another start") {
                     instrumentation.uiAutomation.rootInActiveWindow
                         ?.findAccessibilityNodeInfosByText(button)
-                        ?.any { it.text?.toString() == button && !it.isEnabled } == true
+                        ?.any { it.text?.toString()?.equals(button, ignoreCase = true) == true && !it.isEnabled } == true
                 }
                 click("Mute")
                 await("application mute at host") { PipelineStore.state.value.applicationGainLeft == 0f }
