@@ -4,7 +4,37 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
-## Published limited alpha
+## Published limited alpha 2
+
+`v0.1.0-alpha.2` was published as a **prerelease**, not stable, on September 15, 2026,
+from commit `2e22a46e1e5517cd263b52ac9224b7539df2271d`.
+The [release](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.2) contains
+only the installable APK and `SHA256SUMS`.
+
+- APK SHA-256: `fd0648ede0a46ad64ae4589e6fbaaab7381d98f385f89afada6765cdf73cfdc5`;
+  size 63,937,990 bytes, version code 2.
+- The signing certificate matches alpha 1: SHA-256
+  `273e0baf37614f54c634bd9cf7ae16826e7b2e2a38a7181a15db3ebd5c1b7c60`.
+  An ordinary update install over the signed alpha 1 succeeded without uninstalling it.
+- Signature, API 34 minimum, `debuggable=false`, four-ABI USB/license/retired-code boundary,
+  and 16 KB ZIP alignment checks passed for the signed APK.
+- GitHub run `34970516872` passed the host debug/release build and API 34/36 runtime jobs
+  for this exact commit. Local release build/lint and 116 JVM tests also passed.
+- The actual signed release APK passed all **15 instrumentation tests in 60.405 seconds** on
+  the ordinary-UID API 36 test emulator. The test-only APK used the same signing identity
+  for this check and is not distributed.
+- Before testing, boot-time system/launcher ANR dialogs prevented an unobscured app screen.
+  Bluetooth was disabled in the test emulator and it was rebooted without clearing app data;
+  the remaining System UI dialog was dismissed before instrumentation. Product code, APK bytes,
+  and test acceptance criteria were unchanged. No failed/obscured attempt is counted as a pass.
+- USB alternate-selection and Apple Music welcome-screen evidence are described in
+  [app compatibility](APP_COMPATIBILITY.md). These do not establish subscription playback,
+  complete music-service support or measured physical USB output.
+
+The broader final objective remains open. Release notes distinguish these improvements from
+unverified account, provider and DAC compatibility.
+
+## Historical limited alpha 1
 
 `v0.1.0-alpha.1` was published as a **prerelease**, not stable, on September 15, 2026,
 from commit `859997af68a35b4aea535f3ada7ff179049a9997`.
