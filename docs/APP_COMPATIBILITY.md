@@ -158,6 +158,14 @@ the notification/error-state tests passed. A second attempt was interrupted afte
 dialog recurred, and the emulator was rebooted without clearing app data. Neither attempt is a
 passing full-suite result; a clean runtime rerun and the commit's CI matrix are still required.
 
+After reboot, a Bluetooth controller-start crash and launcher/System UI ANR dialogs also obscured
+the local screen checks. Bluetooth was switched off in this test emulator (not in product code),
+and the system dialogs were dismissed before testing. The unchanged APK then passed all **15 tests
+in 74.201 seconds**, including the new declared/absent service queries, Korean notification channel,
+PCM formats, native capture, lifecycle and Korean home. Native host tests also passed: two PCM
+transport tests and three DSP/USB tests. This is ordinary-UID software evidence, not Bluetooth,
+physical DAC or commercial subscription-playback certification.
+
 ### Current Android intent delivery and independent-player PCM
 
 The default-USB/Korean-UI build passed GitHub run `34896732514` at `9e5e6ed` (host,
