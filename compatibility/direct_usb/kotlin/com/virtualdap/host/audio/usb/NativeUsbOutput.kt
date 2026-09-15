@@ -14,6 +14,7 @@ class NativeUsbOutput(grantedFd: Int, override val profile: UsbAudioStreamingPro
     private val handle = AtomicLong(openNative(
         grantedFd, profile.configuration, profile.interfaceNumber, profile.alternateSetting,
         profile.endpointAddress, profile.feedbackEndpointAddress ?: 0,
+        if (profile.protocol == 0x20) profile.controlInterface else -1,
     ))
 
     override fun control(type: Int, request: Int, value: Int, index: Int, bytes: ByteArray): Int =
@@ -39,7 +40,7 @@ class NativeUsbOutput(grantedFd: Int, override val profile: UsbAudioStreamingPro
 
     companion object {
         init { System.loadLibrary("virtualdap_usb") }
-        @JvmStatic private external fun openNative(fd: Int, config: Int, interfaceNumber: Int, alternate: Int, endpoint: Int, feedback: Int): Long
+        @JvmStatic private external fun openNative(fd: Int, config: Int, interfaceNumber: Int, alternate: Int, endpoint: Int, feedback: Int, controlInterface: Int): Long
         @JvmStatic private external fun controlNative(handle: Long, type: Int, request: Int, value: Int, index: Int, data: ByteArray): Int
         @JvmStatic private external fun startNative(handle: Long, sampleRate: Int, frameBytes: Int)
         @JvmStatic private external fun writeNative(handle: Long, data: ByteArray): Int

@@ -17,6 +17,7 @@ constexpr size_t kMaximumTransferBytes = 256 * 1024;
 std::shared_ptr<IsoOutput> IsoOutput::open(int fd, Profile profile) {
     if (fd < 0 || profile.configuration < 1 || profile.configuration > 255 ||
         profile.interface_number < 0 || profile.interface_number > 255 ||
+        profile.control_interface < -1 || profile.control_interface > 255 ||
         profile.alternate < 1 || profile.alternate > 255 || profile.endpoint < 1 || profile.endpoint > 15 ||
         (profile.feedback_endpoint != 0 && (profile.feedback_endpoint < 0x81 || profile.feedback_endpoint > 0x8f))) {
         throw std::invalid_argument("Invalid USB output profile");
@@ -48,9 +49,14 @@ void IsoOutput::initialize(int fd) {
     require_usb(libusb_get_active_config_descriptor(usb, &raw), "USB descriptors");
     std::unique_ptr<libusb_config_descriptor, decltype(&libusb_free_config_descriptor)> config(raw, libusb_free_config_descriptor);
     bool output_found = false, feedback_found = profile_.feedback_endpoint == 0;
+    bool control_found = profile_.control_interface == -1;
     for (uint8_t i = 0; i < raw->bNumInterfaces; ++i) {
         for (int alt = 0; alt < raw->interface[i].num_altsetting; ++alt) {
             const auto& setting = raw->interface[i].altsetting[alt];
+            if (setting.bInterfaceNumber == profile_.control_interface &&
+                setting.bInterfaceClass == LIBUSB_CLASS_AUDIO && setting.bInterfaceSubClass == 1) {
+                control_found = true;
+            }
             if (setting.bInterfaceNumber != profile_.interface_number || setting.bAlternateSetting != profile_.alternate) continue;
             if (setting.bInterfaceClass != LIBUSB_CLASS_AUDIO || setting.bInterfaceSubClass != 2) {
                 throw std::runtime_error("Selected interface is not an audio streaming interface");
@@ -89,10 +95,17 @@ void IsoOutput::initialize(int fd) {
             }
         }
     }
+    if (!control_found) throw std::runtime_error("Selected AudioControl interface is missing");
     if (!output_found || !feedback_found || packet_limit_ == 0 || packet_limit_ > 49152) {
         throw std::runtime_error("USB audio endpoint is missing or malformed");
     }
     require_usb(libusb_set_auto_detach_kernel_driver(device_, 1), "USB driver handoff");
+    // Interface-recipient clock requests are checked against AudioControl ownership by usbfs.
+    // Claim only the descriptor-declared interface on the already user-granted device.
+    if (profile_.control_interface >= 0) {
+        require_usb(libusb_claim_interface(device_, profile_.control_interface), "USB AudioControl interface permission");
+        control_claimed_ = true;
+    }
     require_usb(libusb_claim_interface(device_, profile_.interface_number), "USB interface permission");
     claimed_ = true;
     require_usb(libusb_set_interface_alt_setting(device_, profile_.interface_number, 0), "USB idle interface");
@@ -376,6 +389,7 @@ void IsoOutput::release() {
     if (device_) {
         if (alternate_active_) libusb_set_interface_alt_setting(device_, profile_.interface_number, 0);
         if (claimed_) libusb_release_interface(device_, profile_.interface_number);
+        if (control_claimed_) libusb_release_interface(device_, profile_.control_interface);
         libusb_close(device_);
         device_ = nullptr;
     }

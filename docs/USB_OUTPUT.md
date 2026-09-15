@@ -5,6 +5,29 @@
 The product build includes both layers for all four ABIs. JVM and simulated native tests cover
 protocol behavior; they do not establish successful playback on a particular physical DAC.
 
+## Reported UAC2 clock failure and interface ownership
+
+The user reported successful USB permission/selection but failure of the 48 kHz PCM self-test
+on every alternate with `USB clock returned a truncated response`. In alpha 2 this message also
+covered **negative libusb errors**, so it did not prove that the DAC sent an incomplete payload.
+The native output claimed AudioStreaming, but not the AudioControl interface addressed by UAC2
+clock requests. Android's kernel USB path checks ownership of interface-recipient requests
+(`drivers/usb/core/devio.c`, `check_ctrlrecip` / `checkintf`); an implicit claim cannot perform the
+explicit kernel-driver handoff that the native transport requests through libusb.
+
+The output now validates and claims the descriptor-declared AudioControl interface before the
+streaming interface for UAC2, and releases both, including partial-open failures. UAC1 retains its
+endpoint-based path. Clock reads distinguish negative transport errors from actual short reads
+and include the request, target and byte counts. No rates are invented, no clock readback is
+skipped, and no mixer or other output is used as a fallback.
+
+The native test models refusal of an interface control request without ownership, successful
+control/stream claims, reverse release, denied control access, denied stream access after control
+claim, and a missing control descriptor. Native DSP/USB tests, 118 JVM tests, debug build/lint,
+and all 15 local ordinary-UID API 36 tests passed (76.086 seconds for the runtime suite).
+This fixes a concrete ownership omission and misleading diagnostics, but the user's DAC's actual
+negative status was hidden in alpha 2: physical resolution is not yet proven by these tests.
+
 
 VirtualDAP contains its own independently implemented USB output path.
 

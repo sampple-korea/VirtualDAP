@@ -34,6 +34,8 @@ std::mutex mutex;
 std::vector<uint8_t> received;
 bool feedback = false, invalid_feedback = false, disconnect = false;
 bool short_packet = false, refuse_claim = false;
+bool with_control = false, refuse_control = false, control_claimed = false;
+std::vector<int> claims, releases;
 uint32_t rate = 44100;
 int speed = LIBUSB_SPEED_HIGH;
 uint16_t packet_limit = 512;
@@ -44,6 +46,9 @@ void reset(bool with_feedback = false) {
     received.clear();
     feedback = with_feedback;
     invalid_feedback = disconnect = short_packet = refuse_claim = false;
+    with_control = refuse_control = control_claimed = false;
+    claims.clear();
+    releases.clear();
     rate = 44100;
     speed = LIBUSB_SPEED_HIGH;
     packet_limit = 512;
@@ -84,17 +89,30 @@ int LIBUSB_CALL libusb_get_device_speed(libusb_device*) { return fake::speed; }
 int LIBUSB_CALL libusb_get_configuration(libusb_device_handle*, int* value) { *value = 1; return 0; }
 int LIBUSB_CALL libusb_set_auto_detach_kernel_driver(libusb_device_handle*, int value) { CHECK(value == 1); return 0; }
 int LIBUSB_CALL libusb_claim_interface(libusb_device_handle*, int number) {
-    CHECK(number == 1);
+    CHECK(number == 1 || (fake::with_control && number == 0));
+    if (number == 0) {
+        if (fake::refuse_control) return LIBUSB_ERROR_ACCESS;
+        fake::control_claimed = true;
+        fake::claims.push_back(number);
+        return 0;
+    }
+    if (!fake::refuse_claim) fake::claims.push_back(number);
     return fake::refuse_claim ? LIBUSB_ERROR_ACCESS : 0;
 }
-int LIBUSB_CALL libusb_release_interface(libusb_device_handle*, int number) { CHECK(number == 1); return 0; }
+int LIBUSB_CALL libusb_release_interface(libusb_device_handle*, int number) {
+    CHECK(number == 1 || (fake::with_control && number == 0));
+    if (number == 0) { CHECK(fake::control_claimed); fake::control_claimed = false; }
+    fake::releases.push_back(number);
+    return 0;
+}
 int LIBUSB_CALL libusb_set_interface_alt_setting(libusb_device_handle*, int number, int alt) {
     CHECK(number == 1 && (alt == 0 || alt == 1)); return 0;
 }
 int LIBUSB_CALL libusb_get_active_config_descriptor(libusb_device*, libusb_config_descriptor** output) {
     static libusb_endpoint_descriptor endpoints[2]{};
     static libusb_interface_descriptor alternate{};
-    static libusb_interface interface{};
+    static libusb_interface interfaces[2]{};
+    static libusb_interface_descriptor control{};
     static libusb_config_descriptor configuration{};
     endpoints[0].bEndpointAddress = 1;
     endpoints[0].bmAttributes = LIBUSB_TRANSFER_TYPE_ISOCHRONOUS | ((fake::feedback ? 1 : 3) << 2);
@@ -110,11 +128,16 @@ int LIBUSB_CALL libusb_get_active_config_descriptor(libusb_device*, libusb_confi
     alternate.bInterfaceSubClass = 2;
     alternate.bNumEndpoints = fake::feedback ? 2 : 1;
     alternate.endpoint = endpoints;
-    interface.altsetting = &alternate;
-    interface.num_altsetting = 1;
-    configuration.bNumInterfaces = 1;
+    interfaces[0].altsetting = &alternate;
+    interfaces[0].num_altsetting = 1;
+    control.bInterfaceNumber = 0;
+    control.bInterfaceClass = LIBUSB_CLASS_AUDIO;
+    control.bInterfaceSubClass = 1;
+    interfaces[1].altsetting = &control;
+    interfaces[1].num_altsetting = 1;
+    configuration.bNumInterfaces = fake::with_control ? 2 : 1;
     configuration.bConfigurationValue = 1;
-    configuration.interface = &interface;
+    configuration.interface = interfaces;
     *output = &configuration;
     return 0;
 }
@@ -125,9 +148,10 @@ int LIBUSB_CALL libusb_get_ss_endpoint_companion_descriptor(libusb_context*, con
     return 0;
 }
 void LIBUSB_CALL libusb_free_ss_endpoint_companion_descriptor(libusb_ss_endpoint_companion_descriptor* value) { delete value; }
-int LIBUSB_CALL libusb_control_transfer(libusb_device_handle*, uint8_t, uint8_t, uint16_t, uint16_t,
+int LIBUSB_CALL libusb_control_transfer(libusb_device_handle*, uint8_t type, uint8_t, uint16_t, uint16_t index,
                                       unsigned char* data, uint16_t length, unsigned int timeout) {
     CHECK(timeout > 0);
+    if ((type & 0x1f) == 1 && (index & 0xff) == 0 && !fake::control_claimed) return LIBUSB_ERROR_BUSY;
     std::fill(data, data + length, 0xab);
     return length;
 }
@@ -333,6 +357,33 @@ int main() {
     bool rejected = false;
     try { output = IsoOutput::open(fd, nominal); } catch (const std::exception&) { rejected = true; }
     CHECK(rejected && fake::active_contexts == 0);
+
+    fake::reset();
+    fake::with_control = true;
+    const Profile uac2{1, 1, 1, 1, 0, 0};
+    output = IsoOutput::open(fd, uac2);
+    CHECK(fake::claims == std::vector<int>({0, 1}));
+    CHECK(output->control(0xa1, 2, 0x100, 0x0a00, value, 2) == 2);
+    finish(output, fd);
+    CHECK(fake::releases == std::vector<int>({1, 0}));
+
+    fake::reset();
+    fake::with_control = fake::refuse_claim = true;
+    rejected = false;
+    try { output = IsoOutput::open(fd, uac2); } catch (const std::exception&) { rejected = true; }
+    CHECK(rejected && fake::active_contexts == 0 && !fake::control_claimed);
+    CHECK(fake::releases == std::vector<int>({0}));
+
+    fake::reset();
+    fake::with_control = fake::refuse_control = true;
+    rejected = false;
+    try { output = IsoOutput::open(fd, uac2); } catch (const std::exception&) { rejected = true; }
+    CHECK(rejected && fake::active_contexts == 0 && fake::claims.empty() && fake::releases.empty());
+
+    fake::reset();
+    rejected = false;
+    try { output = IsoOutput::open(fd, uac2); } catch (const std::exception&) { rejected = true; }
+    CHECK(rejected && fake::active_contexts == 0 && fake::claims.empty());
     ::close(fd);
     std::cout << "USB output: exact bytes, fractional clock, feedback, pause/flush/drain, cancellation, errors and descriptor ownership OK\n";
 }

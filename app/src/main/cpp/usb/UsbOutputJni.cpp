@@ -23,9 +23,10 @@ std::shared_ptr<IsoOutput> lookup(JNIEnv* env, jlong handle) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_virtualdap_host_audio_usb_NativeUsbOutput_openNative(
-    JNIEnv* env, jclass, jint fd, jint config, jint interface_number, jint alternate, jint endpoint, jint feedback) {
+    JNIEnv* env, jclass, jint fd, jint config, jint interface_number, jint alternate, jint endpoint, jint feedback,
+    jint control_interface) {
     try {
-        auto output = IsoOutput::open(fd, {config, interface_number, alternate, endpoint, feedback});
+        auto output = IsoOutput::open(fd, {config, interface_number, alternate, endpoint, feedback, control_interface});
         std::lock_guard<std::mutex> lock(handles_mutex);
         if (handles.size() >= 4 || next_handle == INT64_MAX) throw std::runtime_error("Too many USB audio outputs");
         const auto handle = next_handle++;

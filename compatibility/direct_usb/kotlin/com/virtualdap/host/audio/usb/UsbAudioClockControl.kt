@@ -287,7 +287,10 @@ class UsbAudioClockControl(
     }
 
     private fun readExact(type: Int, request: Int, value: Int, index: Int, data: ByteArray) {
-        check(pipe.transfer(type, request, value, index, data) == data.size) { "USB clock returned a truncated response" }
+        val received = pipe.transfer(type, request, value, index, data)
+        val target = "request=0x${request.toString(16)}, value=0x${value.toString(16)}, index=0x${index.toString(16)}"
+        check(received >= 0) { "USB clock control transfer failed (libusb=$received; $target; expected=${data.size})" }
+        check(received == data.size) { "USB clock returned a truncated response ($received/${data.size} bytes; $target)" }
     }
 
     private fun ByteArray.u16(offset: Int) = (this[offset].toInt() and 0xff) or

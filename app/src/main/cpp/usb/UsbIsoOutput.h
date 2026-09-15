@@ -15,6 +15,7 @@ namespace virtualdap::usb {
 
 struct Profile {
     int configuration, interface_number, alternate, endpoint, feedback_endpoint;
+    int control_interface = -1;
 };
 
 struct Statistics {
@@ -59,7 +60,7 @@ private:
     int fd_ = -1, speed_ = 0;
     libusb_context* context_ = nullptr;
     libusb_device_handle* device_ = nullptr;
-    bool claimed_ = false, alternate_active_ = false;
+    bool claimed_ = false, control_claimed_ = false, alternate_active_ = false;
     uint32_t packet_limit_ = 0, interval_ticks_ = 0, bus_ticks_ = 0;
     uint32_t feedback_limit_ = 0;
     unsigned invalid_feedback_streak_ = 0;

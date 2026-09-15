@@ -12,6 +12,24 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class UsbAudioClockControlTest {
+    @Test fun transportErrorsAreNotMisreportedAsShortClockResponses() {
+        val control = UsbAudioClockControl(UsbAudioControlPipe { _, _, _, _, _ -> -6 })
+        val error = assertThrows(IllegalStateException::class.java) {
+            control.supportedRates(profile().copy(protocol = 0x20, controlInterface = 2, clockEntity = 10))
+        }
+        assertTrue(error.message.orEmpty().contains("libusb=-6"))
+        assertTrue(error.message.orEmpty().contains("index=0xa02"))
+        assertTrue(!error.message.orEmpty().contains("truncated"))
+    }
+
+    @Test fun incompleteClockCountIncludesActualAndRequiredByteCounts() {
+        val control = UsbAudioClockControl(UsbAudioControlPipe { _, _, _, _, _ -> 1 })
+        val error = assertThrows(IllegalStateException::class.java) {
+            control.supportedRates(profile().copy(protocol = 0x20, controlInterface = 2, clockEntity = 10))
+        }
+        assertTrue(error.message.orEmpty().contains("1/2 bytes"))
+    }
+
     @Test fun uac1FrequencyIsWrittenAndReadBackThroughTheOutputEndpoint() {
         var rate = 0
         val control = UsbAudioClockControl(UsbAudioControlPipe { type, request, value, index, data ->
