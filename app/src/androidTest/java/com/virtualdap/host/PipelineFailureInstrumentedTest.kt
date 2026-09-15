@@ -21,7 +21,8 @@ class PipelineFailureInstrumentedTest {
     @Test fun failedSessionStaysVisibleAcrossIdleConnectionsAndCleanDisconnects() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         PipelineStore.update { PipelineSnapshot(enabled = true) }
-        AudioSessionMixer(context, {}).use { sessions ->
+        val notifications = mutableListOf<String>()
+        AudioSessionMixer(context, notifications::add).use { sessions ->
             val first = sessions.createSession()
             val idle = sessions.createSession()
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
@@ -29,6 +30,7 @@ class PipelineFailureInstrumentedTest {
             val peer = Credentials(Process.myPid(), Process.myUid(), Process.myUid())
             first.onGuestConnected(peer, handshake)
             idle.onGuestConnected(peer, handshake)
+            assertEquals("음악 앱 연결됨", notifications.last())
             val failure = assertThrows(IllegalStateException::class.java) { first.onVolume(0f, 0f) }
             first.onGuestDisconnected(failure.message)
             assertEquals(PipelinePhase.ERROR, PipelineStore.state.value.phase)
@@ -38,6 +40,7 @@ class PipelineFailureInstrumentedTest {
             assertEquals(failure.message, PipelineStore.state.value.lastError)
             assertEquals(0, PipelineStore.state.value.connectedStreams)
             assertFalse(PipelineStore.state.value.bitPerfectActive)
+            assertEquals("오디오 출력 상태를 확인해 주세요", notifications.last())
         }
         PipelineStore.update { PipelineSnapshot() }
     }
@@ -61,5 +64,8 @@ class PipelineFailureInstrumentedTest {
         assertEquals(PipelinePhase.ERROR, PipelineStore.state.value.phase)
         assertTrue(PipelineStore.state.value.lastError.orEmpty().contains("official bit-perfect"))
         assertFalse(PipelineStore.state.value.enabled)
+        val channel = context.getSystemService(android.app.NotificationManager::class.java)
+            .getNotificationChannel("virtualdap_audio")
+        assertEquals("음악 재생", channel?.name?.toString())
     }
 }

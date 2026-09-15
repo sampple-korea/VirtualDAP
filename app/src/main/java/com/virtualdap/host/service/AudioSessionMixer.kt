@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-/** Independent capture sessions share exactly one official bit-perfect output lease. */
+/** Independent capture sessions share exactly one explicitly selected output lease. */
 class AudioSessionMixer(
     private val context: Context,
     private val notify: (String) -> Unit,
@@ -118,13 +118,13 @@ class AudioSessionMixer(
             beforeOutputStart()
             if (active) configure()
             PipelineStore.log("Stream $id connected: ${handshake.format.shortLabel()}")
-            notify("Music space connected")
+            notify("음악 앱 연결됨")
         }
 
         private fun configure() {
             synchronized(topology) {
                 check(outputOwner == null || outputOwner == id) {
-                    "Official bit-perfect output is already owned by another track. Stop that track and disable crossfade."
+                    "다른 트랙이 출력 장치를 사용 중입니다. 해당 트랙을 중지하고 크로스페이드를 꺼 주세요."
                 }
                 outputOwner = id
             }
@@ -190,14 +190,14 @@ class AudioSessionMixer(
                     sink.setPlaying(true)
                     configure()
                     update { it.copy(phase = PipelinePhase.BUFFERING) }
-                    notify("Playing ${state.sourceFormat?.shortLabel()}")
+                    notify("${state.sourceFormat?.shortLabel() ?: "음악"} 재생 중")
                 }
                 BridgeControl.PAUSE -> {
                     sink.setPlaying(false)
                     active = false
                     state = state.copy(phase = PipelinePhase.PAUSED)
                     reconcile()
-                    if (PipelineStore.state.value.playingStreams == 0) notify("Music paused")
+                    if (PipelineStore.state.value.playingStreams == 0) notify("음악 재생 일시정지")
                 }
                 BridgeControl.FLUSH -> {
                     sink.flush()
@@ -256,7 +256,7 @@ class AudioSessionMixer(
                 PipelineStore.log(failureReason?.let { "Stream $id disconnected: $it" } ?: "Stream $id completed",
                     if (failureReason == null) LogLevel.INFO else LogLevel.WARNING)
                 if (PipelineStore.state.value.connectedStreams == 0) {
-                    notify(if (PipelineStore.state.value.lastError == null) "Waiting for music" else "Audio stream needs attention")
+                    notify(if (PipelineStore.state.value.lastError == null) "음악 재생 대기 중" else "오디오 출력 상태를 확인해 주세요")
                 }
             }
         }

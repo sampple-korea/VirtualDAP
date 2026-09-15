@@ -95,7 +95,7 @@ class AudioPipelineService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Satisfy every startForegroundService request, including unsupported-output failures.
-        if (intent?.action in setOf(ACTION_START, ACTION_SELF_TEST, ACTION_PLAY_DSD)) ensureForeground("Preparing audio")
+        if (intent?.action in setOf(ACTION_START, ACTION_SELF_TEST, ACTION_PLAY_DSD)) ensureForeground("오디오 준비 중")
         when (intent?.action ?: ACTION_START) {
             ACTION_START -> startPipeline()
             ACTION_STOP -> {
@@ -142,7 +142,7 @@ class AudioPipelineService : Service() {
             serviceStarted = false
             return
         }
-        ensureForeground("Waiting for music")
+        ensureForeground("음악 재생 대기 중")
         if (bridge != null) return
         val sessions = AudioSessionMixer(
             this, ::updateNotification,
@@ -276,7 +276,7 @@ class AudioPipelineService : Service() {
     private fun fail(message: String) {
         PipelineStore.update { it.copy(phase = PipelinePhase.ERROR, lastError = message) }
         PipelineStore.log(message, LogLevel.ERROR)
-        updateNotification("Audio pipeline needs attention")
+        updateNotification("오디오 출력 상태를 확인해 주세요")
     }
 
     @android.annotation.SuppressLint("WakelockTimeout")
@@ -327,14 +327,14 @@ class AudioPipelineService : Service() {
             val pause = PendingIntent.getService(this, 2,
                 Intent(this, AudioPipelineService::class.java).setAction(ACTION_PAUSE_DSD),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            builder.addAction(0, "Pause", pause)
+            builder.addAction(0, "일시정지", pause)
         } else if (dsd.phase == DsdPlaybackPhase.PAUSED) {
             val resume = PendingIntent.getService(this, 3,
                 Intent(this, AudioPipelineService::class.java).setAction(ACTION_RESUME_DSD),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            builder.addAction(0, "Resume", resume)
+            builder.addAction(0, "다시 재생", resume)
         }
-        return builder.addAction(0, "Stop", stop).build()
+        return builder.addAction(0, "중지", stop).build()
     }
 
     private fun updateNotification(text: String) {
@@ -344,7 +344,7 @@ class AudioPipelineService : Service() {
     private fun ensureForeground(text: String) {
         if (!serviceStarted) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Music space audio", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL_ID, "음악 재생", NotificationManager.IMPORTANCE_LOW),
             )
             ServiceCompat.startForeground(
                 this,
@@ -380,7 +380,7 @@ class AudioPipelineService : Service() {
             ?: displayName(uri)
             ?: "Selected DSD file"
         if (bridge != null || mixer != null) stopPipeline(false)
-        ensureForeground("Preparing $fileName")
+        ensureForeground("$fileName 준비 중")
         updatePlaybackWakeLock(true)
         PipelineStore.update {
             it.copy(
@@ -513,7 +513,7 @@ class AudioPipelineService : Service() {
             is DsdPlaybackEvent.Started -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
                 PipelineStore.log("DSD playback started: ${event.format.shortLabel()} via ${PipelineStore.state.value.dsdPlayback.mode.name}")
-                updateNotification("Playing ${PipelineStore.state.value.dsdPlayback.fileName}")
+                updateNotification("${PipelineStore.state.value.dsdPlayback.fileName ?: "DSD"} 재생 중")
             }
             is DsdPlaybackEvent.Progress -> {
                 val now = SystemClock.elapsedRealtime()
@@ -531,12 +531,12 @@ class AudioPipelineService : Service() {
             DsdPlaybackEvent.Paused -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PAUSED)) }
                 mainHandler.post { updatePlaybackWakeLock(false) }
-                updateNotification("DSD playback paused")
+                updateNotification("DSD 재생 일시정지")
             }
             DsdPlaybackEvent.Resumed -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(phase = DsdPlaybackPhase.PLAYING)) }
                 mainHandler.post { updatePlaybackWakeLock(true) }
-                updateNotification("Playing ${PipelineStore.state.value.dsdPlayback.fileName}")
+                updateNotification("${PipelineStore.state.value.dsdPlayback.fileName ?: "DSD"} 재생 중")
             }
             DsdPlaybackEvent.Completed -> {
                 PipelineStore.update { it.copy(dsdPlayback = it.dsdPlayback.copy(
