@@ -124,6 +124,24 @@ failed run is not counted as a pass. The corrected fixture requires that exact t
 25–60 seconds elapsed, and still fails if the privileged authenticator succeeds. These are
 error-handling and regression results, **not Google/Apple login certification**.
 
+The new user-facing host-dependency import path then copied real Google Play services
+successfully in **49.160 seconds**, including comparison with the source APK's signing
+metadata. This validates importing code, not service authorization or authentication.
+
+A subsequent supervised Apple Music 6.5.2 inspection reached its main tab screen, but
+crashed before credential entry. Android rejected `ISessionController.sendCustomAction`
+because the request declared `com.apple.android.music` while its actual calling UID belonged
+to `com.virtualdap.host`. The existing session-creation adapter correctly uses the real host
+package; controller commands require separate investigation. Changing authentication or
+claiming a provider identity would not fix this caller-attribution mismatch.
+The old inspection harness reported its initialization-only test as passed in 243.356 seconds
+despite the observed crash; this is **not** a UI/login success. The inspection path now also
+requires the original app process to remain alive at its end. Provider login, credentials,
+subscription playback and physical USB were not tested in this inspection.
+The strengthened check reproduced the process-exit failure in **90.803 seconds**. The setup
+commit `9af2a61` independently passed GitHub run `35054756617` (host build and ordinary-UID
+API 34/36 suites); that green fixture result does not override this Apple Music failure.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
@@ -357,7 +375,8 @@ For an explicitly supervised local inspection, `externalInspectionSeconds` (0–
 keeps the test-only paced receiver alive after the selected startup/screen check. This allows
 manual onboarding navigation before the instrumentation process exits. The wait itself is **not**
 a login, navigation or playback assertion; record the actual observed screens/errors separately.
-It neither submits credentials nor accepts agreements automatically. Normal CI does not wait.
+It checks that the original app process remains alive after the window, but neither submits
+credentials nor accepts agreements automatically. Normal CI does not wait.
 
 ```sh
 adb push /path/to/legitimately-obtained.apks /data/local/tmp/virtualdap-app.apks

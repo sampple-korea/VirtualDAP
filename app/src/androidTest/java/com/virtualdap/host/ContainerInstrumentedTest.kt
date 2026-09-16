@@ -122,8 +122,14 @@ class ContainerInstrumentedTest {
                 if (inspectionSeconds > 0) {
                     // Explicit local inspection window only: keeps the real app and paced receiver
                     // alive for manual navigation. Elapsed time does not certify login or playback.
+                    val inspectedPid = requireNotNull(ContainerRuntime.state.value.applications
+                        .first { it.packageName == expected }.lastStartedPid)
                     android.util.Log.i("VirtualDAP-Compat", "Manual inspection ready: $expected ($inspectionSeconds seconds)")
                     SystemClock.sleep(inspectionSeconds * 1000L)
+                    val processes = context.getSystemService(android.app.ActivityManager::class.java)
+                        .runningAppProcesses.orEmpty()
+                    assertTrue("External app process exited during manual inspection; initialization is not compatibility",
+                        processes.any { it.pid == inspectedPid })
                 }
             }
             return
