@@ -51,6 +51,19 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_wifi_returns_real_service_data_and_maps_only_known_caller_field(self):
+        proxy = (JAVA / "fake/service/IWifiManagerProxy.java").read_text()
+        self.assertIn("WifiCallerAttribution.invoke(getBase(), method, args", proxy)
+        for fabricated in ("BRWifiInfo", "BRWifiSsid", "BlackBox_Wifi", "ac:62:5a:82:65:c4"):
+            self.assertNotIn(fabricated, proxy)
+        helper = (JAVA / "utils/compat/WifiCallerAttribution.java").read_text()
+        self.assertIn('"getConnectionInfo".equals(method.getName())', helper)
+        self.assertIn("guestPackage.equals(args[0])", helper)
+        self.assertIn("forwarded = args.clone()", helper)
+        self.assertIn("forwarded[0] = hostPackage", helper)
+        self.assertNotIn("forwarded[1] =", helper)
+        self.assertIn("throw failure.getCause()", helper)
+
     def test_imported_google_authorities_do_not_escape_to_host_account_providers(self):
         activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
         for authority in ("com.google.android.gms", "com.google.android.gsf", "com.android.vending"):

@@ -62,6 +62,17 @@ public final class MusicFixtureActivity extends Activity {
         controllerStatus.setText("MEDIA CONTROLLER: pending");
         content.addView(controllerStatus);
         TextView networkStatus = new TextView(this);
+        TextView wifiStatus = new TextView(this);
+        content.addView(wifiStatus);
+        try {
+            android.net.wifi.WifiManager wifi = getApplicationContext().getSystemService(android.net.wifi.WifiManager.class);
+            // No SSID/MAC logging and no location permission: Android may redact all identifiers.
+            // Null (disconnected) is valid; a caller-package/UID failure is not.
+            if (wifi != null) wifi.getConnectionInfo();
+            wifiStatus.setText("WIFI STATE READY: system query returned");
+        } catch (RuntimeException failure) {
+            wifiStatus.setText("WIFI STATE ERROR: " + failure);
+        }
         networkStatus.setText("NETWORK STATE: pending");
         content.addView(networkStatus);
         TextView providerStatus = new TextView(this);

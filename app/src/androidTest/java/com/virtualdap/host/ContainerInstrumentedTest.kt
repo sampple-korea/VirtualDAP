@@ -191,6 +191,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("NETWORK STATE READY:")?.isNotEmpty() == true
             }
+            await("Wi-Fi state uses real host caller identity without inventing connection details") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("WIFI STATE ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("WIFI STATE READY: system query returned")?.isNotEmpty() == true
+            }
             await("imported providers use their actual container process, not authority-substring host routing") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("PRIVATE PROVIDER ERROR:")?.firstOrNull()?.text

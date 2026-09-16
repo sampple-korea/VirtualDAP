@@ -367,6 +367,37 @@ Google Play API 36 emulator, then passed its exact visible `Sign in` screen chec
 process-inspection window in **130.891 seconds**. This is startup-screen evidence, not a completed
 Google account login, DRM/subscription playback, PCM capture or physical USB-output result.
 
+A second supervised run passed the same screen/process checks in **224.881 seconds**, including
+its 180-second inspection window. Manual navigation displayed YouTube Music's actual `Accounts` /
+`Add account` dialog. Selecting `Add account` did not reach a credential form during that window.
+The process-survival assertion applies to the music app only: captured logs showed its imported
+Google services process crashing on `WifiManager.getConnectionInfo` during a network change,
+because the guest package name did not belong to the real host UID. This run therefore does not
+certify Google-services stability or account addition.
+
+### Wi-Fi connection-state caller attribution
+
+The inherited Wi-Fi adapter passed the guest caller package to the system and replaced the returned
+SSID/MAC/BSSID with constants. The replacement maps only `getConnectionInfo`'s known caller field
+when it equals the current guest package, using the real host package. Android 14 and 16's
+`IWifiManager.aidl` both declare `(String callingPackage, String callingFeatureId)` for this method.
+The feature tag, arguments of unrelated/unknown layouts, actual returned object (including null
+or redacted identifiers), and permission exceptions remain unchanged. No location permission,
+system UID, manufactured network identity or successful permission result is introduced.
+
+Regression tests cover the exact caller field, original-argument immutability, null/foreign callers,
+unknown methods/layouts, same-object results and real remote denial propagation. The music fixture
+also invokes the real OS Wi-Fi query without recording SSIDs/MACs or asking for location access.
+Build/unit/lint passed in **5m 6s**, with 130 JVM tests, 27 prepared-source checks, the packaged
+four-ABI output boundary, two native PCM transport tests and three native DSP/USB tests passing.
+The first old-host comparison timed out before fixture initialization (**100.585 seconds**), so
+it is not a Wi-Fi regression result. Repeating with the same old host and new fixture then failed
+at `WIFI STATE ERROR: java.lang.reflect.UndeclaredThrowableException` in **26.865 seconds**.
+The corrected host then passed all **22 ordinary-UID API 36 tests in 148.702 seconds**, including
+the real Wi-Fi query and the new argument/result/exception tests. This does not assert account
+login success or cover every Wi-Fi service method. The provider-routing commit `5400129` separately
+passed host/API 34/API 36 CI in run `35138737543` before this Wi-Fi change.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
