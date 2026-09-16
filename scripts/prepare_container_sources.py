@@ -167,6 +167,13 @@ def prepare(upstream, dobby, overrides, output):
         "            if (permission.equals(Manifest.permission.SEND_SMS)) {")
     activity_manager.write_text(content, encoding="utf-8")
 
+    media_session = package / "fake/service/IMediaSessionManagerProxy.java"
+    content = media_session.read_text(encoding="utf-8")
+    content = replace_once(content, "            return method.invoke(who, args);",
+        "            return top.niunaijun.blackbox.utils.compat.MediaControllerAttribution.wrapSession(\n"
+        "                    method.invoke(who, args));")
+    media_session.write_text(content, encoding="utf-8")
+
     account_service = package / "core/system/accounts/BAccountManagerService.java"
     content = account_service.read_text(encoding="utf-8")
     begin = content.index("    public AuthenticatorDescription[] getAuthenticatorTypes(int userId)")

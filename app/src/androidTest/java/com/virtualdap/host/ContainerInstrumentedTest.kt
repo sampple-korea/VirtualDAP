@@ -179,6 +179,12 @@ class ContainerInstrumentedTest {
             }
             assertEquals("A new intent must not replace the existing activity instance", firstActivity,
                 ContainerRuntime.state.value.foregroundActivity)
+            await("real media commands retain caller attribution and token/payload identity") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("MEDIA CONTROLLER ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("MEDIA CONTROLLER READY: local / parcel")?.isNotEmpty() == true
+            }
             await("declared media service and bounded failure of an unauthorized authenticator session") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")

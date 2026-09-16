@@ -51,6 +51,18 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_media_controllers_preserve_real_binder_and_attribute_only_caller_fields(self):
+        helper = (JAVA / "utils/compat/MediaControllerAttribution.java").read_text()
+        self.assertIn('getDeclaredField("CREATOR")', helper)
+        self.assertIn('getDeclaredField("mBinder")', helper)
+        self.assertIn('"getController".equals(name)', helper)
+        self.assertIn("guest.equals(args[0])", helper)
+        self.assertIn("forwarded = args.clone()", helper)
+        self.assertIn("method.invoke(target, forwarded)", helper)
+        self.assertIn("throw error.getCause()", helper)
+        self.assertNotIn("new Binder", helper)
+        self.assertNotIn("return true", helper)
+
     def test_authenticator_discovery_does_not_require_an_existing_account(self):
         service = (JAVA / "core/system/accounts/BAccountManagerService.java").read_text()
         block = service.split("public AuthenticatorDescription[] getAuthenticatorTypes(int userId)", 1)[1]

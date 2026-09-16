@@ -124,6 +124,7 @@ object ContainerRuntime {
                 override fun beforeCreateApplication(
                     packageName: String, processName: String, context: Context, userId: Int,
                 ) {
+                    top.niunaijun.blackbox.utils.compat.MediaControllerAttribution.install()
                     check(top.niunaijun.blackbox.core.AudioCapture.install()) {
                         "Audio interception is unavailable on this Android runtime"
                     }

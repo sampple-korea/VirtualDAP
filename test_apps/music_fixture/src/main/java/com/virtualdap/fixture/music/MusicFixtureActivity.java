@@ -31,6 +31,7 @@ public final class MusicFixtureActivity extends Activity {
     private volatile boolean stopFirstTrack;
     private TextView status;
     private TextView newIntentStatus;
+    private android.media.session.MediaSession controllerSession;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -54,6 +55,49 @@ public final class MusicFixtureActivity extends Activity {
             mediaRoutes.setText("MEDIA ROUTER ERROR: " + failure);
         }
         content.addView(mediaRoutes);
+        TextView controllerStatus = new TextView(this);
+        controllerStatus.setText("MEDIA CONTROLLER: pending");
+        content.addView(controllerStatus);
+        try {
+            controllerSession = new android.media.session.MediaSession(this, "fixture-controller-attribution");
+            String nonce = java.util.UUID.randomUUID().toString();
+            java.util.Set<String> deliveries = new java.util.HashSet<>();
+            controllerSession.setCallback(new android.media.session.MediaSession.Callback() {
+                @Override public void onCustomAction(String action, Bundle extras) {
+                    if (!getPackageName().equals(action) || extras == null || !nonce.equals(extras.getString("nonce"))
+                            || !"com.virtualdap.host".equals(controllerSession.getCurrentControllerInfo().getPackageName())) {
+                        controllerStatus.setText("MEDIA CONTROLLER ERROR: caller or command payload changed");
+                        return;
+                    }
+                    deliveries.add(extras.getString("path"));
+                    if (deliveries.contains("local") && deliveries.contains("parcel")) {
+                        controllerStatus.setText("MEDIA CONTROLLER READY: local / parcel");
+                    }
+                }
+            }, new android.os.Handler(getMainLooper()));
+            controllerSession.setActive(true);
+            Bundle command = new Bundle();
+            command.putString("nonce", nonce);
+            command.putString("path", "local");
+            // Use the guest package as payload too: only the caller field may be rewritten.
+            controllerSession.getController().getTransportControls().sendCustomAction(getPackageName(), command);
+            android.os.Parcel parcel = android.os.Parcel.obtain();
+            try {
+                android.media.session.MediaSession.Token original = controllerSession.getSessionToken();
+                parcel.writeParcelable(original, 0);
+                parcel.setDataPosition(0);
+                android.media.session.MediaSession.Token restored = parcel.readParcelable(
+                        android.media.session.MediaSession.Token.class.getClassLoader(), android.media.session.MediaSession.Token.class);
+                if (!original.equals(restored) || original.hashCode() != restored.hashCode()) {
+                    throw new IllegalStateException("Media token identity changed during parceling");
+                }
+                command.putString("path", "parcel");
+                new android.media.session.MediaController(this, restored).getTransportControls()
+                        .sendCustomAction(getPackageName(), command);
+            } finally { parcel.recycle(); }
+        } catch (RuntimeException failure) {
+            controllerStatus.setText("MEDIA CONTROLLER ERROR: " + failure);
+        }
         TextView serviceQuery = new TextView(this);
         try {
             android.content.Intent query = new android.content.Intent("android.media.browse.MediaBrowserService")
@@ -470,6 +514,7 @@ public final class MusicFixtureActivity extends Activity {
 
     @Override public void onDestroy() {
         playing = false;
+        if (controllerSession != null) controllerSession.release();
         AudioTrack current = activeTrack;
         if (current != null) current.stop();
         super.onDestroy();

@@ -142,6 +142,29 @@ The strengthened check reproduced the process-exit failure in **90.803 seconds**
 commit `9af2a61` independently passed GitHub run `35054756617` (host build and ordinary-UID
 API 34/36 suites); that green fixture result does not override this Apple Music failure.
 
+### Media-controller caller attribution (after alpha 3)
+
+The controller adapter now forwards only the caller-package fields of known platform media
+commands as the real host package matching this process's actual UID. It wraps controllers
+returned by session creation and tokens received through Android's parcel creator. Original
+OS binders, token equality/hash, command payloads, callback results and thrown exceptions are
+preserved. This does not grant media/account permissions or impersonate the music provider.
+The caller-field list was checked against AOSP's Android 16 `ISessionController.aidl`.
+
+A fixture sends real custom commands through both a local controller and a parcel-restored
+token, using its guest package as the command payload to catch overly broad string replacement.
+The same test APK failed against the preceding host in **58.312 seconds**, reproducing the
+package/UID exception. Against the fixed host, the complete ordinary-UID API 36 suite passed
+**17 tests in 115.010 seconds**, including PCM capture and both controller paths. Debug build,
+lint and 125 JVM tests passed (5m 4s); 22 prepared-source checks and APK boundary checks passed.
+
+The unmodified Apple Music 6.5.2 subsequently passed a 60-second supervised process-liveness
+inspection (**116.001 seconds** total). Its Library screen rendered and tab navigation worked;
+the New tab still showed a loading indicator. No credentials were entered and login, complete
+catalog loading, subscription playback and physical DAC output remain unverified. This result
+addresses the observed controller crash, not all of the user's reported loading problems.
+These changes are not present in the public alpha 3 APK.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
