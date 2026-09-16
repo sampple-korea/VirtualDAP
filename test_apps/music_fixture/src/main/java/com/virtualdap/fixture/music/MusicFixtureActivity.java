@@ -68,6 +68,10 @@ public final class MusicFixtureActivity extends Activity {
                 throw new IllegalStateException("Undeclared service action returned a fabricated match");
             }
             int authenticatorMatches = 0;
+            if (checkSelfPermission(android.Manifest.permission.ACCOUNT_MANAGER)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                throw new IllegalStateException("A guest must not receive Android's ACCOUNT_MANAGER permission");
+            }
             for (android.accounts.AuthenticatorDescription authenticator :
                     android.accounts.AccountManager.get(this).getAuthenticatorTypes()) {
                 if ("com.virtualdap.fixture.discovery".equals(authenticator.type)) {
@@ -82,6 +86,21 @@ public final class MusicFixtureActivity extends Activity {
                     + authenticatorMatches);
             }
             serviceQuery.setText("MEDIA SERVICE QUERY READY / AUTHENTICATOR DISCOVERY READY");
+            final long authStart = android.os.SystemClock.elapsedRealtime();
+            android.accounts.AccountManager.get(this).editProperties(
+                "com.virtualdap.fixture.discovery", null, future -> {
+                    try {
+                        future.getResult();
+                        serviceQuery.setText("MEDIA SERVICE QUERY ERROR: privileged authenticator unexpectedly accepted");
+                    } catch (android.accounts.AuthenticatorException expected) {
+                        long elapsed = android.os.SystemClock.elapsedRealtime() - authStart;
+                        serviceQuery.setText("timeout".equals(expected.getMessage()) && elapsed >= 25_000 && elapsed < 60_000
+                            ? "MEDIA SERVICE QUERY READY / AUTHENTICATOR TIMEOUT REPORTED"
+                            : "MEDIA SERVICE QUERY ERROR: unexpected authenticator deadline " + elapsed);
+                    } catch (Exception failure) {
+                        serviceQuery.setText("MEDIA SERVICE QUERY ERROR: " + failure);
+                    }
+                }, new android.os.Handler(getMainLooper()));
         } catch (RuntimeException failure) {
             serviceQuery.setText("MEDIA SERVICE QUERY ERROR: " + failure);
         }

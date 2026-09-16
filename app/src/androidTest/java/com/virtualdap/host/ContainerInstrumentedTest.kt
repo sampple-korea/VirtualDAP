@@ -45,7 +45,8 @@ class ContainerInstrumentedTest {
             val expected = requireNotNull(InstrumentationRegistry.getArguments().getString("externalPackage"))
             if (hostPackage != null) {
                 assertTrue("Host app should be discoverable",
-                    ContainerRuntime.state.value.hostApplications.any { it.packageName == hostPackage })
+                    (ContainerRuntime.state.value.hostApplications + ContainerRuntime.state.value.hostServices)
+                        .any { it.packageName == hostPackage })
                 ContainerRuntime.importHostApp(hostPackage)
             } else {
                 requireNotNull(externalName)
@@ -172,12 +173,12 @@ class ContainerInstrumentedTest {
             }
             assertEquals("A new intent must not replace the existing activity instance", firstActivity,
                 ContainerRuntime.state.value.foregroundActivity)
-            await("declared media service and account-free authenticator discovery inside the container") {
+            await("declared media service and bounded failure of an unauthorized authenticator session") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")
                     ?.firstOrNull()?.text
                 if (failure != null) org.junit.Assert.fail(failure.toString())
-                root?.findAccessibilityNodeInfosByText("AUTHENTICATOR DISCOVERY READY")?.isNotEmpty() == true
+                root?.findAccessibilityNodeInfosByText("AUTHENTICATOR TIMEOUT REPORTED")?.isNotEmpty() == true
             }
             click("Check unsupported output rejection")
             await("ordinary-UID MediaRouter2 discovery") {

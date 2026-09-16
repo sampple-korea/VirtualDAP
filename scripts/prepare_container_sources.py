@@ -16,10 +16,25 @@ def replace_once(text, before, after):
     return text.replace(before, after, 1)
 
 
-def prepare(upstream, dobby, overrides, output):
-    if output.name != "upstream" or output.parent.name != "generated":
+def reset_generated_output(output, inputs):
+    if (output.name != "upstream" or output.parent.name != "generated"
+            or output.parent.parent.name != "build"):
         raise ValueError("Output must be the dedicated build/generated/upstream directory")
+    if any(path.is_symlink() for path in (output, *output.parents)):
+        raise ValueError("Generated output must not traverse a symlink")
+    target = output.resolve()
+    for source in inputs:
+        source = source.resolve()
+        if not source.is_dir() or target == source or target in source.parents or source in target.parents:
+            raise ValueError("Generated output must not overlap or replace source inputs")
+    if output.exists():
+        shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
+
+
+def prepare(upstream, dobby, overrides, output):
+    # Rebuild a disposable source tree, not an overlay: removed overrides must not survive.
+    reset_generated_output(output, (upstream, dobby, overrides))
     for name in ("java", "aidl", "res", "assets", "cpp"):
         source = upstream / name
         if source.is_dir():
@@ -140,6 +155,18 @@ def prepare(upstream, dobby, overrides, output):
         (package / f"fake/service/{name}.java").unlink()
     hooks.write_text(content, encoding="utf-8")
 
+    activity_manager = package / "fake/service/IActivityManagerProxy.java"
+    content = activity_manager.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "            if (permission.equals(Manifest.permission.ACCOUNT_MANAGER)\n"
+        "                    || permission.equals(Manifest.permission.SEND_SMS)) {",
+        "            if (permission.equals(Manifest.permission.ACCOUNT_MANAGER)) {\n"
+        "                // Container setup does not grant Android's privileged account authority.\n"
+        "                return method.invoke(who, args);\n"
+        "            }\n"
+        "            if (permission.equals(Manifest.permission.SEND_SMS)) {")
+    activity_manager.write_text(content, encoding="utf-8")
+
     account_service = package / "core/system/accounts/BAccountManagerService.java"
     content = account_service.read_text(encoding="utf-8")
     begin = content.index("    public AuthenticatorDescription[] getAuthenticatorTypes(int userId)")
@@ -147,16 +174,93 @@ def prepare(upstream, dobby, overrides, output):
     content = content[:begin] + '''    public AuthenticatorDescription[] getAuthenticatorTypes(int userId) throws RemoteException {
         // Discover installed authenticators even before the user creates their first account.
         // Query this user's actual service declarations, not saved accounts or host identities.
-        Map<String, AuthenticatorInfo> installed = new java.util.TreeMap<>();
-        generateServicesMap(mPms.queryIntentServices(
-                new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT),
-                PackageManager.GET_META_DATA, userId), installed, new RegisteredServicesParser());
+        Map<String, AuthenticatorInfo> installed = queryAuthenticators(userId);
         List<AuthenticatorDescription> descriptions = new ArrayList<>();
         for (AuthenticatorInfo info : installed.values()) descriptions.add(info.desc);
         return descriptions.toArray(new AuthenticatorDescription[0]);
     }
 
 ''' + content[end:]
+    # Discovery and session binding must see the same user's installed services. The upstream
+    # global cache was cleared on every install and rebuilt for only that package / USER_ALL.
+    content = replace_once(content, "    private final AuthenticatorCache mAuthenticatorCache = new AuthenticatorCache();\n", "")
+    content = replace_once(content, "import top.niunaijun.blackbox.core.system.pm.PackageMonitor;\n", "")
+    content = replace_once(content, "implements ISystemService , PackageMonitor", "implements ISystemService")
+    begin = content.index("    @Override\n    public void systemReady()")
+    end = content.index("    private void loadAccounts()", begin)
+    content = content[:begin] + '''    @Override
+    public void systemReady() {
+        loadAccounts();
+    }
+
+''' + content[end:]
+    begin = content.index("    private static final class AuthenticatorCache")
+    end = content.index("    private static AuthenticatorDescription", begin)
+    content = content[:begin] + content[end:]
+    begin = content.index("    public void loadAuthenticatorCache(String packageName)")
+    end = content.index("    private void generateServicesMap(", begin)
+    content = content[:begin] + '''    private Map<String, AuthenticatorInfo> queryAuthenticators(int userId) {
+        Map<String, AuthenticatorInfo> installed = new java.util.TreeMap<>();
+        generateServicesMap(mPms.queryIntentServices(
+                new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT),
+                PackageManager.GET_META_DATA, userId), installed, new RegisteredServicesParser());
+        return installed;
+    }
+
+    private AuthenticatorInfo findAuthenticator(String type, int userId) {
+        return queryAuthenticators(userId).get(type);
+    }
+
+''' + content[end:]
+    content = replace_once(content, "mAuthenticatorCache.authenticators.get(account.type)",
+                           "findAuthenticator(account.type, userId)")
+    content = replace_once(content, "mAuthenticatorCache.authenticators.get(authenticatorType)",
+                           "findAuthenticator(authenticatorType, mAccounts.userId)")
+    content = replace_once(content, "                bUserAccounts = new BUserAccounts();",
+                           "                bUserAccounts = new BUserAccounts();\n                bUserAccounts.userId = userId;")
+    begin = content.index("    private void generateServicesMap(")
+    end = content.index("    private abstract class Session", begin)
+    parser_block = replace_once(content[begin:end],
+        "                    e.printStackTrace();\n                }",
+        "                    e.printStackTrace();\n                } finally {\n                    parser.close();\n                }")
+    content = content[:begin] + parser_block + content[end:]
+    # The upstream removed timeout messages but never scheduled them, leaving rejected
+    # one-way authenticator requests pending indefinitely. Bound the initial service response;
+    # a real UI continuation gets a separate, longer user-interaction deadline.
+    content = replace_once(content, "        IAccountAuthenticator mAuthenticator = null;",
+        "        IAccountAuthenticator mAuthenticator = null;\n"
+        "        private volatile boolean mBound;\n"
+        "        private final Runnable mTimeout = this::onTimedOut;")
+    content = replace_once(content, "        IAccountManagerResponse getResponseAndClose() {",
+        "        synchronized IAccountManagerResponse getResponseAndClose() {")
+    content = replace_once(content, "        private void close() {", "        private synchronized void close() {")
+    content = replace_once(content, "        void bind() {",
+        "        void bind() {\n"
+        "            mHandler.postDelayed(mTimeout, 30_000L);")
+    content = replace_once(content, "            if (mAuthenticator != null) {\n                mAuthenticator = null;\n                mContext.unbindService(this);",
+        "            mAuthenticator = null;\n"
+        "            if (mBound) {\n                mBound = false;\n                mContext.unbindService(this);")
+    content = replace_once(content, "            mHandler.removeMessages(MESSAGE_TIMED_OUT, this);",
+        "            mHandler.removeCallbacks(mTimeout);\n"
+        "            mHandler.removeMessages(MESSAGE_TIMED_OUT, this);")
+    content = replace_once(content, "        public void onServiceConnected(ComponentName name, IBinder service) {",
+        "        public synchronized void onServiceConnected(ComponentName name, IBinder service) {\n"
+        "            if (mResponse == null) { unbind(); return; }")
+    content = replace_once(content, "        public void onServiceDisconnected(ComponentName name) {",
+        "        public void onNullBinding(ComponentName name) {\n"
+        "            onError(AccountManager.ERROR_CODE_REMOTE_EXCEPTION, \"authenticator returned no binder\");\n"
+        "        }\n\n"
+        "        @Override\n        public void onBindingDied(ComponentName name) {\n"
+        "            onError(AccountManager.ERROR_CODE_REMOTE_EXCEPTION, \"authenticator binding died\");\n"
+        "        }\n\n"
+        "        @Override\n        public void onServiceDisconnected(ComponentName name) {")
+    content = replace_once(content, "                response = mResponse;\n            } else {",
+        "                cancelTimeout();\n"
+        "                mHandler.postDelayed(mTimeout, 10 * 60_000L);\n"
+        "                response = mResponse;\n            } else {")
+    content = replace_once(content, "            if (!mContext.bindService(intent, this, flags)) {",
+        "            mBound = mContext.bindService(intent, this, flags);\n"
+        "            if (!mBound) {")
     account_service.write_text(content, encoding="utf-8")
 
     package_proxy = package / "fake/service/IPackageManagerProxy.java"
@@ -479,7 +583,7 @@ def main():
     parser.add_argument("--overrides", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     args = parser.parse_args()
-    prepare(args.upstream.resolve(), args.dobby.resolve(), args.overrides.resolve(), args.output.resolve())
+    prepare(args.upstream.resolve(), args.dobby.resolve(), args.overrides.resolve(), args.output.absolute())
 
 
 if __name__ == "__main__":

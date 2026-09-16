@@ -142,7 +142,7 @@ private fun VirtualDAPApp() {
                 Box {
                     TextButton(onClick = { menuOpen = true }) { Text("도구") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        listOf("진단", "출력 소리 테스트", "로컬 DSD 파일").forEach { name ->
+                        listOf("로그인 환경", "진단", "출력 소리 테스트", "로컬 DSD 파일").forEach { name ->
                             DropdownMenuItem(text = { Text(name) }, onClick = { menuOpen = false; tool = name })
                         }
                     }
@@ -171,6 +171,36 @@ private fun VirtualDAPApp() {
             text = {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     when (title) {
+                        "로그인 환경" -> {
+                            item {
+                                Text("Google 기반 음악 앱에서 사용하는 구성요소입니다. 휴대폰에 설치된 APK만 복사하며, 계정·비밀번호·앱 데이터는 가져오지 않습니다.")
+                                Text("아래에 설치됨으로 표시되어도 로그인 호환성이 검증된 것은 아닙니다. Apple Music 계정은 Apple Music 안에서 직접 로그인하세요.",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                            items(GoogleServiceCatalog.packages, key = { it.packageName }) { dependency ->
+                                val installed = apps.applications.any { it.packageName == dependency.packageName }
+                                val available = apps.hostServices.any { it.packageName == dependency.packageName }
+                                Text(dependency.name, fontWeight = FontWeight.Bold)
+                                Text(dependency.description, style = MaterialTheme.typography.bodySmall)
+                                Text(if (installed) "음악 공간에 설치됨" else "음악 공간에 없음")
+                                if (available) TextButton(
+                                    onClick = { ContainerRuntime.importHostApp(dependency.packageName) },
+                                    enabled = apps.phase == ContainerPhase.READY,
+                                ) { Text(if (installed) "휴대폰 버전으로 업데이트" else "휴대폰에서 가져오기") }
+                                else Text("휴대폰에서 사용 가능한 패키지를 찾지 못했습니다.", style = MaterialTheme.typography.bodySmall)
+                                HorizontalDivider()
+                            }
+                            item {
+                                if (apps.phase == ContainerPhase.INSTALLING) Text("구성요소를 확인하고 설치하는 중입니다…")
+                                apps.lastError?.let { ErrorText(it) }
+                                TextButton(onClick = {
+                                    import.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream"))
+                                }, enabled = apps.phase == ContainerPhase.READY) { Text("APK / APKS 파일로 추가") }
+                                TextButton(onClick = ContainerRuntime::refresh, enabled = apps.phase.canRefresh) { Text("새로고침") }
+                                Text("구성요소를 변경한 뒤에는 음악 앱을 중지하고 다시 여세요. 시스템 특권이나 기기 인증 상태는 변경되지 않습니다.",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                         "진단" -> {
                             item { Text("USB 연결 여부와 Android 공식 경로 지원 여부는 서로 다릅니다.") }
                             items(audio.availableRoutes, key = { it.id }) { route ->
@@ -279,12 +309,12 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
             apps.lastError?.let { ErrorText(it) }
             audio.lastError?.let { ErrorText(it) }
         }
-        if (apps.applications.isEmpty()) item {
+        if (apps.musicApplications.isEmpty()) item {
             Section("아직 추가한 음악 앱이 없습니다") {
                 Text("APK / APKS 파일을 선택하거나, 휴대폰에 설치된 음악 앱을 가져오세요. 기존 계정과 앱 데이터는 복사하지 않습니다.")
             }
         }
-        items(apps.applications, key = { it.packageName }) { app ->
+        items(apps.musicApplications, key = { it.packageName }) { app ->
             Section(app.name) {
                 Text(if (app.lastStartedPid != null) "시작됨 · 재생 상태는 앱에서 확인" else "실행 준비", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

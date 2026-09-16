@@ -83,6 +83,47 @@ service-callback main-thread assertion. Correct package metadata alone did not r
 that application's startup. Neither this fix nor the authenticator discovery below is
 included in the published alpha 3 APK.
 
+### Login environment and bounded authenticator failures (after alpha 3)
+
+Comparison with the reference's dependency classifications led to a separate Korean
+`도구 → 로그인 환경` panel. It imports user-selected real host base/split APKs for GMS, GSF,
+the Store and an optional legacy account manager using the existing verified installer.
+These packages no longer appear as playable music cards. No Google APK, host account data
+or provider login implementation is bundled. The reference's native account implementation
+is not reproduced or claimed to have been completely recovered.
+
+Authenticator discovery and session binding now query the same container user's installed
+services. The previous global cache could be cleared by installing an unrelated package,
+and queried USER_ALL instead of the session user. New account records now retain their actual
+user ID; each authenticator XML parser is closed after use.
+
+A real `AbstractAccountAuthenticator` fixture exposed a separate Android 16 restriction:
+the Binder request reached the authenticator but Android rejected `ACCOUNT_MANAGER`.
+An experimental local bridge also failed caller validation and was discarded, not relaxed.
+There is no permission-checker replacement in the product; the earlier blanket account
+permission response is removed. A rootless imported APK does not inherit its former system
+privileges, and this remains a blocker for affected authenticators, not successful login.
+
+The old session removed timeout messages without ever scheduling one. Requests that never
+respond now return a remote/authenticator error after 30 seconds; a real login-activity
+continuation gets a separate ten-minute deadline. Binding death/null binding are reported,
+pending bindings are released, and a late callback cannot run an already-closed session.
+The fixture checks an actual timeout error and elapsed time, not an invented success result.
+
+During verification, removed override files were found to survive in the generated source
+overlay. Preparation now rebuilds only the validated disposable `build/generated/upstream`
+tree, rejecting symlinks and source/output overlap. Source and APK-boundary checks assert that
+the discarded bridge is absent. Tracked upstream inputs and user files are not removed.
+
+The final ordinary-UID API 36 suite passed **17 tests in 96.206 seconds**, including the
+bounded authenticator error, PCM capture and the Korean login-environment dialog. Debug
+build/lint passed in **4m 51s**, with **125 JVM tests**, **21 generated-source/preparation
+checks** and the four-ABI APK product-boundary check. The first timeout test incorrectly
+expected `IOException`; Android actually returned `AuthenticatorException: timeout`. That
+failed run is not counted as a pass. The corrected fixture requires that exact timeout and
+25–60 seconds elapsed, and still fails if the privileged authenticator succeeds. These are
+error-handling and regression results, **not Google/Apple login certification**.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed

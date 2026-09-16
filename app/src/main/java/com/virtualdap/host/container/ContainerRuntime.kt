@@ -19,6 +19,7 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import com.virtualdap.host.model.MusicAppCatalog
+import com.virtualdap.host.model.GoogleServiceCatalog
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +54,10 @@ data class ContainerSnapshot(
     val lastError: String? = null,
     val hostApplications: List<ContainerApp> = emptyList(),
     val foregroundActivity: ContainerActivity? = null,
+    val hostServices: List<ContainerApp> = emptyList(),
 ) {
+    val musicApplications: List<ContainerApp> get() = applications.filterNot { GoogleServiceCatalog.contains(it.packageName) }
+
     internal fun activityChanged(activity: ContainerActivity, resumed: Boolean): ContainerSnapshot = when {
         applications.none { it.packageName == activity.packageName } -> this
         resumed -> copy(foregroundActivity = activity)
@@ -230,7 +234,12 @@ object ContainerRuntime {
 
     /** Copy APK code only; host app accounts, private data and permissions are never copied. */
     fun importHostApp(packageName: String) = importPackage { context, staging ->
-        require(MusicAppCatalog.popularApps.any { it.packageName == packageName }) { "Not a catalog music app" }
+        require(MusicAppCatalog.popularApps.any { it.packageName == packageName } || GoogleServiceCatalog.contains(packageName)) {
+            "Not a catalog music app or login dependency"
+        }
+        require(packageName != GoogleServiceCatalog.STORE || context.packageManager.getLaunchIntentForPackage(packageName) != null) {
+            "설치된 패키지는 실행 가능한 Play 스토어가 아닙니다. 라이선스 확인용 대체 패키지는 가져올 수 없습니다."
+        }
         val info = context.packageManager.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
         val files = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty()
         val bundle = File(staging, "installed-app.apks")
@@ -403,6 +412,18 @@ object ContainerRuntime {
                     )
                     if (!installed.enabled) null else ContainerApp(
                         candidate.packageName, candidate.name, installed.minSdkVersion,
+                    )
+                } catch (_: PackageManager.NameNotFoundException) { null }
+            },
+            hostServices = GoogleServiceCatalog.packages.mapNotNull { dependency ->
+                try {
+                    val installed = context.packageManager.getApplicationInfo(
+                        dependency.packageName, PackageManager.ApplicationInfoFlags.of(0),
+                    )
+                    val usableStore = dependency.packageName != GoogleServiceCatalog.STORE ||
+                        context.packageManager.getLaunchIntentForPackage(dependency.packageName) != null
+                    if (!installed.enabled || !usableStore) null else ContainerApp(
+                        dependency.packageName, dependency.name, installed.minSdkVersion,
                     )
                 } catch (_: PackageManager.NameNotFoundException) { null }
             },

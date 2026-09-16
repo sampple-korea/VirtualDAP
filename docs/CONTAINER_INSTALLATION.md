@@ -4,10 +4,27 @@ Imports run as the normal Android application UID. Only APKs selected by the use
 the host does not request unrestricted storage or install-package privileges. Hosted app data uses
 separate directories, but the shared-UID container is **not a security sandbox**. Install trusted apps.
 
-The installed-app picker queries only declared catalog package names, not the complete device app
+The installed-app picker queries only declared music catalog and login-dependency package names, not the complete device app
 inventory. It copies base/split APK code from the selected installed app into a bounded private ZIP
 and uses the same manifest/signature/atomic-publication path. Private app data and accounts are not
 read or migrated. A concurrent store update that produces mismatched versions/signatures is rejected.
+
+## Login environment
+
+The Korean `도구 → 로그인 환경` panel separately lists Google Play services, Google Services
+Framework, the Play Store and the optional legacy Google account-manager package. Users may
+copy an available enabled host package, including its splits, through the same verified installer,
+or select a legitimately obtained APK/APKS. No dependency is downloaded, bundled or silently
+imported. A host Store package without a launcher is excluded to avoid importing an emulator's
+license-checker stub as if it were the actual Store. This is a suitability check, not a certificate
+or authenticity certification. Container-installed dependencies remain lifecycle-visible but do
+not appear as music cards.
+
+Installed status establishes only that a package is present. It does not establish Google or
+Apple login, privileged permissions, device integrity, subscriptions or playback compatibility.
+The container does not copy existing accounts or turn a system package into a privileged app.
+Apple Music login is performed inside Apple Music; adding Google dependencies is not presented
+as a fix for Apple's account flow. Restart affected music apps after changing dependencies.
 
 ## APK sets
 

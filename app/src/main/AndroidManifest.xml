@@ -17,6 +17,11 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
+        <!-- Only the user-selectable login dependencies, not the complete installed inventory. -->
+        <package android:name="com.google.android.gsf" />
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.android.vending" />
+        <package android:name="com.google.android.gsf.login" />
         <package android:name="com.apple.android.music" />
         <package android:name="com.spotify.music" />
         <package android:name="com.google.android.apps.youtube.music" />

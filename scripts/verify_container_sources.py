@@ -2,8 +2,10 @@
 """Regression checks on the exact prepared consumer engine (no device/root required)."""
 
 import pathlib
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from prepare_container_sources import reset_generated_output
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PREPARED = ROOT / "container_runtime/core/build/generated/upstream"
@@ -11,18 +13,81 @@ JAVA = PREPARED / "java/top/niunaijun/blackbox"
 APP_JAVA = ROOT / "app/src/main/java/com/virtualdap/host"
 
 
+class GeneratedOutputTests(unittest.TestCase):
+    def test_regeneration_removes_obsolete_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "source"
+            source.mkdir()
+            output = root / "build/generated/upstream"
+            output.mkdir(parents=True)
+            (output / "stale.java").write_text("obsolete override")
+            reset_generated_output(output, (source,))
+            self.assertEqual([], list(output.iterdir()))
+            self.assertTrue(source.is_dir())
+
+    def test_source_overlap_is_rejected_before_removing_anything(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "build/generated/upstream"
+            output.mkdir(parents=True)
+            marker = output / "source.java"
+            marker.write_text("keep")
+            with self.assertRaises(ValueError):
+                reset_generated_output(output, (output,))
+            self.assertEqual("keep", marker.read_text())
+
+    def test_symlink_output_is_rejected_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "keep").write_text("source")
+            output = root / "build/generated/upstream"
+            output.parent.mkdir(parents=True)
+            output.symlink_to(source, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                reset_generated_output(output, (source,))
+            self.assertEqual("source", (source / "keep").read_text())
+
+
 class PreparedContainerTests(unittest.TestCase):
     def test_authenticator_discovery_does_not_require_an_existing_account(self):
         service = (JAVA / "core/system/accounts/BAccountManagerService.java").read_text()
         block = service.split("public AuthenticatorDescription[] getAuthenticatorTypes(int userId)", 1)[1]
         block = block.split("@Override", 1)[0]
-        self.assertIn("mPms.queryIntentServices(", block)
-        self.assertIn("PackageManager.GET_META_DATA, userId", block)
-        self.assertIn("new RegisteredServicesParser()", block)
+        self.assertIn("queryAuthenticators(userId)", block)
         self.assertIn("info.desc", block)
         self.assertNotIn("getUserAccounts", block)
         self.assertNotIn("USER_ALL", block)
         self.assertNotIn("new AuthenticatorDescription(", block)
+
+    def test_authenticator_sessions_resolve_the_actual_users_services(self):
+        service = (JAVA / "core/system/accounts/BAccountManagerService.java").read_text()
+        self.assertNotIn("mAuthenticatorCache", service)
+        self.assertNotIn("loadAuthenticatorCache", service)
+        self.assertIn("findAuthenticator(account.type, userId)", service)
+        self.assertIn("findAuthenticator(authenticatorType, mAccounts.userId)", service)
+        self.assertIn("bUserAccounts.userId = userId", service)
+        query = service.split("private Map<String, AuthenticatorInfo> queryAuthenticators", 1)[1]
+        query = query.split("private void generateServicesMap", 1)[0]
+        self.assertIn("PackageManager.GET_META_DATA, userId", query)
+        self.assertNotIn("USER_ALL", query)
+        parser = service.split("private void generateServicesMap", 1)[1].split("private abstract class Session", 1)[0]
+        self.assertIn("finally {\n                    parser.close();", parser)
+
+    def test_authenticator_timeouts_do_not_grant_system_account_permission(self):
+        self.assertFalse((JAVA / "core/AuthenticatorServiceBridge.java").exists())
+        self.assertFalse((JAVA / "fake/service/IPermissionCheckerProxy.java").exists())
+        service = (JAVA / "core/system/accounts/BAccountManagerService.java").read_text()
+        self.assertIn("mHandler.postDelayed(mTimeout, 30_000L)", service)
+        self.assertIn("mHandler.postDelayed(mTimeout, 10 * 60_000L)", service)
+        self.assertIn("mHandler.removeCallbacks(mTimeout)", service)
+        self.assertIn("mBound = mContext.bindService", service)
+        activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
+        block = activity.split("if (permission.equals(Manifest.permission.ACCOUNT_MANAGER))", 1)[1]
+        block = block.split("if (permission.equals(Manifest.permission.SEND_SMS))", 1)[0]
+        self.assertIn("return method.invoke(who, args)", block)
+        self.assertNotIn("PERMISSION_GRANTED", block)
 
     def test_current_android_new_intents_use_activity_record(self):
         thread = (JAVA / "app/BActivityThread.java").read_text()

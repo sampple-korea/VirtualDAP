@@ -19,6 +19,8 @@ with zipfile.ZipFile(apk) as archive:
         b"Ltop/niunaijun/blackbox/fake/service/GmsProxy",
         b"Ltop/niunaijun/blackbox/fake/service/GoogleAccountManagerProxy",
         b"Ltop/niunaijun/blackbox/fake/service/AuthenticationProxy",
+        b"Ltop/niunaijun/blackbox/core/AuthenticatorServiceBridge",
+        b"Ltop/niunaijun/blackbox/fake/service/IPermissionCheckerProxy",
     )
     for name in names:
         if name.endswith(".dex"):

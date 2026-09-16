@@ -57,6 +57,11 @@ class UsbModeInstrumentedTest {
         click("진단")
         await("diagnostics dialog") { visible("USB 연결 여부와 Android 공식 경로 지원 여부는 서로 다릅니다.") }
         click("닫기")
+        click("도구")
+        click("로그인 환경")
+        await("login dependency setup") { visible("Google 서비스 프레임워크") }
+        assertFalse(visible("앱 열기"))
+        click("닫기")
         click("오디오 출력")
         await("USB default and advanced official choices") { visible("USB 오디오 · 기본") && visible("공식 비트퍼펙트 · 고급") }
         click("공식 비트퍼펙트 · 고급")
