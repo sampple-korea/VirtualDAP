@@ -14,7 +14,7 @@ import android.widget.TextView;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-/** No network or storage permission: a deterministic app to validate container and PCM behavior. */
+/** No Internet or storage permission: validates container state and PCM without remote requests. */
 public final class MusicFixtureActivity extends Activity {
     static { System.loadLibrary("music_fixture_audio"); }
 
@@ -32,6 +32,7 @@ public final class MusicFixtureActivity extends Activity {
     private TextView status;
     private TextView newIntentStatus;
     private android.media.session.MediaSession controllerSession;
+    private android.net.ConnectivityManager.NetworkCallback networkCallback;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -58,6 +59,32 @@ public final class MusicFixtureActivity extends Activity {
         TextView controllerStatus = new TextView(this);
         controllerStatus.setText("MEDIA CONTROLLER: pending");
         content.addView(controllerStatus);
+        TextView networkStatus = new TextView(this);
+        networkStatus.setText("NETWORK STATE: pending");
+        content.addView(networkStatus);
+        try {
+            android.net.ConnectivityManager networks = getSystemService(android.net.ConnectivityManager.class);
+            android.os.Parcel networkParcel = android.os.Parcel.obtain();
+            try {
+                networkParcel.writeInt(Integer.MAX_VALUE);
+                networkParcel.setDataPosition(0);
+                android.net.Network absent = android.net.Network.CREATOR.createFromParcel(networkParcel);
+                if (networks.getNetworkCapabilities(absent) != null || networks.getLinkProperties(absent) != null) {
+                    throw new IllegalStateException("An absent network must not have invented capabilities or DNS");
+                }
+            } finally { networkParcel.recycle(); }
+            boolean online = networks.getActiveNetwork() != null;
+            android.net.ConnectivityManager.NetworkCallback callback = new android.net.ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(android.net.Network network) {
+                    networkStatus.setText("NETWORK STATE READY: real default callback");
+                }
+            };
+            networks.registerDefaultNetworkCallback(callback, new android.os.Handler(getMainLooper()));
+            networkCallback = callback;
+            if (!online) networkStatus.setText("NETWORK STATE READY: offline");
+        } catch (RuntimeException failure) {
+            networkStatus.setText("NETWORK STATE ERROR: " + failure);
+        }
         try {
             controllerSession = new android.media.session.MediaSession(this, "fixture-controller-attribution");
             String nonce = java.util.UUID.randomUUID().toString();
@@ -514,6 +541,10 @@ public final class MusicFixtureActivity extends Activity {
 
     @Override public void onDestroy() {
         playing = false;
+        if (networkCallback != null) {
+            getSystemService(android.net.ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
+            networkCallback = null;
+        }
         if (controllerSession != null) controllerSession.release();
         AudioTrack current = activeTrack;
         if (current != null) current.stop();

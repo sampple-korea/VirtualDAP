@@ -185,6 +185,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("MEDIA CONTROLLER READY: local / parcel")?.isNotEmpty() == true
             }
+            await("real network state and default callback without invented DNS or capabilities") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("NETWORK STATE ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("NETWORK STATE READY:")?.isNotEmpty() == true
+            }
             await("declared media service and bounded failure of an unauthorized authenticator session") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")

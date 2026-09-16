@@ -51,6 +51,19 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_connectivity_preserves_real_network_state_and_errors(self):
+        proxy = (JAVA / "fake/service/IConnectivityManagerProxy.java").read_text()
+        self.assertIn('case "requestNetwork": caller = 8;', proxy)
+        self.assertIn('case "listenForNetwork": caller = 4;', proxy)
+        self.assertIn("guest.equals(args[caller])", proxy)
+        self.assertIn("forwarded = args.clone()", proxy)
+        self.assertIn("forwarded[caller] = BlackBoxCore.getHostPkg()", proxy)
+        self.assertIn("return method.invoke(getBase(), forwarded)", proxy)
+        self.assertIn("throw error.getCause()", proxy)
+        for fabricated in ("createNetwork", "8.8.8.8", "setDetailedState", "addCapability",
+                           "return true", "createMock", "@ScanClass"):
+            self.assertNotIn(fabricated, proxy)
+
     def test_media_controllers_preserve_real_binder_and_attribute_only_caller_fields(self):
         helper = (JAVA / "utils/compat/MediaControllerAttribution.java").read_text()
         self.assertIn('getDeclaredField("CREATOR")', helper)

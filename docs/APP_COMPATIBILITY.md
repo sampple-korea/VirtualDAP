@@ -165,6 +165,40 @@ catalog loading, subscription playback and physical DAC output remain unverified
 addresses the observed controller crash, not all of the user's reported loading problems.
 These changes are not present in the public alpha 3 APK.
 
+The media-controller commit `110f38c` passed GitHub run `35056554891`, including the host
+build and ordinary-UID API 34/36 suites. A longer local inspection stayed alive for 180 seconds
+(234.714 seconds total), but Settings → Sign In failed visibly: the embedded login sheet timed
+out in `LoadingHTML` and displayed an error. The same unmodified Apple Music APK installed
+normally on the same emulator subsequently reached **Continue with Email**, with its own
+`Bootstrap: Succeeded` log. No email or credentials were entered in either environment. The
+container's process-liveness pass must not be described as login-screen success. The native
+baseline narrows this failure to the container environment; it does not identify the cause alone.
+
+### Real connectivity state instead of invented fallback networks
+
+The pinned engine's connectivity adapter manufactured network IDs/capabilities/DNS when the
+platform returned no network, forced connected/validated states, and swallowed registration
+errors. The replacement delegates Android results and errors unchanged, correcting only known
+caller-package fields to the actual host UID's package. It does not change DNS servers, private
+DNS, metering, VPN/network state, request UIDs or callback executors. Caller positions were
+checked against AOSP's Android 14 and Android 16 `IConnectivityManager.aidl`.
+
+The fixture now queries an absent network and requires null capabilities/link properties. It
+registers a real default-network callback, requiring delivery when an active network exists;
+offline environments are reported explicitly. It has `ACCESS_NETWORK_STATE`, but still no
+Internet or storage permission and sends no remote requests. The first baseline attempt failed
+during a lost runtime-service connection, before testing connectivity. After restarting only the
+test host and dismissing a visible emulator-launcher ANR, the unchanged old host failed the new
+absent-network assertion in **66.896 seconds**. The new host passed all **17 ordinary-UID API 36
+tests in 101.659 seconds**, with actual default-network callback delivery observed. Debug build,
+lint, 125 JVM tests, 23 prepared-source checks and the APK product-boundary check passed.
+These software results do not establish that Apple/Google login or physical USB output works.
+The subsequent Apple Music inspection stayed alive (238.199 seconds), but its login sheet still
+timed out in `LoadingHTML`. WebView also logged invalid Google services identity and a supervised-
+user query timeout. The connectivity correction therefore resolves the independently reproduced
+false-network defect, not this login failure. Neither certificate checks nor WebView safety
+checks were disabled to change that result.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
