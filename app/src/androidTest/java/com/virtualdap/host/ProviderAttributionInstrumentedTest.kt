@@ -24,8 +24,14 @@ class ProviderAttributionInstrumentedTest {
         val host = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals(host.packageName, BlackBoxCore.getHostPkg())
         val next = AttributionSource.Builder(12345).setPackageName("com.example.downstream").build()
-        val original = AttributionSource.Builder(12346).setPackageName("com.example.guest")
-            .setAttributionTag("fixture-tag").setNext(next).build()
+        val builder = AttributionSource.Builder(12346).setPackageName("com.example.guest")
+            .setAttributionTag("fixture-tag").setNext(next)
+        AttributionSource.Builder::class.java.getDeclaredMethod("setPid", Int::class.javaPrimitiveType)
+            .invoke(builder, 12347)
+        AttributionSource.Builder::class.java.getDeclaredMethod("setRenouncedPermissions", Set::class.java)
+            .invoke(builder, setOf("android.permission.CAMERA"))
+        val original = AttributionSource::class.java.getDeclaredMethod("withToken", IBinder::class.java)
+            .invoke(builder.build(), Binder()) as AttributionSource
         val extras = Bundle().apply { putString("payload", "com.example.guest") }
         val remoteError = SecurityException("fixture provider denied")
         val binder = Binder()
@@ -43,6 +49,11 @@ class ProviderAttributionInstrumentedTest {
                 // A copy must preserve the OS attribution token, not register a fabricated identity.
                 val token = AttributionSource::class.java.getDeclaredMethod("getToken")
                 assertEquals(token.invoke(original), token.invoke(caller))
+                val pid = AttributionSource::class.java.getDeclaredMethod("getPid")
+                assertEquals(12347, pid.invoke(caller))
+                val renounced = AttributionSource::class.java.getDeclaredMethod("getRenouncedPermissions")
+                assertEquals(setOf("android.permission.CAMERA"), renounced.invoke(caller))
+                if (android.os.Build.VERSION.SDK_INT >= 35) assertEquals(original.deviceId, caller.deviceId)
                 queries++
                 return extras
             }

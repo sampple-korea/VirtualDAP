@@ -33,6 +33,7 @@ public final class MusicFixtureActivity extends Activity {
     private TextView newIntentStatus;
     private android.media.session.MediaSession controllerSession;
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
+    private android.content.BroadcastReceiver privateReceiver;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -84,6 +85,35 @@ public final class MusicFixtureActivity extends Activity {
             if (!online) networkStatus.setText("NETWORK STATE READY: offline");
         } catch (RuntimeException failure) {
             networkStatus.setText("NETWORK STATE ERROR: " + failure);
+        }
+        TextView broadcastStatus = new TextView(this);
+        broadcastStatus.setText("PRIVATE BROADCAST: pending");
+        content.addView(broadcastStatus);
+        try {
+            String nonce = java.util.UUID.randomUUID().toString();
+            String action = "com.virtualdap.fixture.PRIVATE_BROADCAST." + nonce;
+            android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    if (!action.equals(intent.getAction()) || !nonce.equals(intent.getStringExtra("nonce"))
+                            || !getPackageName().equals(intent.getPackage())) {
+                        broadcastStatus.setText("PRIVATE BROADCAST ERROR: payload or destination changed");
+                    } else {
+                        broadcastStatus.setText("PRIVATE BROADCAST READY: music space only");
+                    }
+                }
+            };
+            registerReceiver(receiver, new android.content.IntentFilter(action), RECEIVER_NOT_EXPORTED);
+            privateReceiver = receiver;
+            android.os.Parcel userParcel = android.os.Parcel.obtain();
+            try {
+                userParcel.writeInt(-1); // USER_ALL: only this container's private shadow may narrow it.
+                userParcel.setDataPosition(0);
+                android.os.UserHandle all = android.os.UserHandle.CREATOR.createFromParcel(userParcel);
+                sendBroadcastAsUser(new android.content.Intent(action).setPackage(getPackageName())
+                        .putExtra("nonce", nonce), all);
+            } finally { userParcel.recycle(); }
+        } catch (RuntimeException failure) {
+            broadcastStatus.setText("PRIVATE BROADCAST ERROR: " + failure);
         }
         try {
             controllerSession = new android.media.session.MediaSession(this, "fixture-controller-attribution");
@@ -541,6 +571,10 @@ public final class MusicFixtureActivity extends Activity {
 
     @Override public void onDestroy() {
         playing = false;
+        if (privateReceiver != null) {
+            unregisterReceiver(privateReceiver);
+            privateReceiver = null;
+        }
         if (networkCallback != null) {
             getSystemService(android.net.ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
             networkCallback = null;

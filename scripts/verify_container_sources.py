@@ -51,12 +51,30 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_private_broadcast_routing_preserves_os_restrictions(self):
+        activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
+        begin = activity.index('    @ProxyMethod("broadcastIntent")')
+        broadcast = activity[begin:activity.index('    @ProxyMethod("unregisterReceiver")', begin)]
+        self.assertIn("ContainerBroadcastRouting.prepare", broadcast)
+        self.assertIn("method.invoke(who, forwarded)", broadcast)
+        self.assertIn("throw error.getCause()", broadcast)
+        self.assertNotIn("instanceof String[]", broadcast)
+        self.assertNotIn("args[i] = null", broadcast)
+        self.assertNotIn("args[getPermissionIndex()] = null", activity)
+        self.assertNotIn("args[permissionIndex] = null", activity)
+        routing = (JAVA / "utils/compat/ContainerBroadcastRouting.java").read_text()
+        self.assertIn("hostPackage.equals(shadow.getPackage())", routing)
+        self.assertIn("shadow.getComponent() != null", routing)
+        self.assertIn("requestedUser != guestUser", routing)
+        self.assertIn("forwarded[forwarded.length - 1] = hostUser", routing)
+        self.assertIn("if (shadow == null) return args", routing)
+
     def test_provider_adapter_changes_only_a_copy_of_the_actual_caller(self):
         proxy = (JAVA / "fake/service/context/providers/ContentProviderStub.java").read_text()
         self.assertIn("args[0] instanceof AttributionSource", proxy)
-        self.assertIn("new AttributionSource.Builder(original)", proxy)
-        self.assertIn(".setPackageName(BlackBoxCore.getHostPkg())", proxy)
-        self.assertIn(".setNext(original.getNext())", proxy)
+        self.assertIn('getDeclaredMethod("withPackageName", String.class)', proxy)
+        self.assertIn("COPY_WITH_PACKAGE.invoke(original, BlackBoxCore.getHostPkg())", proxy)
+        self.assertNotIn("new AttributionSource.Builder", proxy)
         self.assertIn("_set_uid(BlackBoxCore.getHostUid())", proxy)
         self.assertIn("forwarded = args.clone()", proxy)
         self.assertIn("return method.invoke(base, forwarded)", proxy)

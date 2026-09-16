@@ -157,6 +157,40 @@ def prepare(upstream, dobby, overrides, output):
 
     activity_manager = package / "fake/service/IActivityManagerProxy.java"
     content = activity_manager.read_text(encoding="utf-8")
+    begin = content.index('    @ProxyMethod("broadcastIntent")')
+    end = content.index('    @ProxyMethod("unregisterReceiver")', begin)
+    content = content[:begin] + '''    @ProxyMethod("broadcastIntent")
+    public static class BroadcastIntent extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            int index = top.niunaijun.blackbox.utils.compat.ContainerBroadcastRouting.intentIndex(method.getName(), args);
+            Intent intent = (Intent) args[index];
+            String resolvedType = (String) args[index + 1];
+            int guestUser = BActivityThread.getUserId();
+            Intent shadow = BlackBoxCore.getBActivityManager().sendBroadcast(intent, resolvedType, guestUser);
+            if (shadow != null) shadow.setExtrasClassLoader(BActivityThread.getApplication().getClassLoader());
+            Object[] forwarded = top.niunaijun.blackbox.utils.compat.ContainerBroadcastRouting.prepare(
+                    method.getName(), args, shadow, guestUser, BlackBoxCore.getHostUserId(), BlackBoxCore.getHostPkg());
+            try {
+                return method.invoke(who, forwarded);
+            } catch (java.lang.reflect.InvocationTargetException error) {
+                throw error.getCause();
+            }
+        }
+    }
+
+''' + content[end:]
+    # Receiving an internal broadcast must not erase the sender permission requested by the app.
+    content = replace_once(content,
+        "            if (args[getPermissionIndex()] != null) {\n"
+        "                args[getPermissionIndex()] = null;\n"
+        "            }",
+        "            // Retain the receiver's required sender permission for Android to enforce.")
+    content = replace_once(content,
+        "            if (args[permissionIndex] != null) {\n"
+        "                args[permissionIndex] = null;\n"
+        "            }",
+        "            // Retain the receiver's required sender permission for Android to enforce.")
     content = replace_once(content,
         "            if (permission.equals(Manifest.permission.ACCOUNT_MANAGER)\n"
         "                    || permission.equals(Manifest.permission.SEND_SMS)) {",

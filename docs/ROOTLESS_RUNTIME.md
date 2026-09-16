@@ -14,6 +14,11 @@ private DNS, metering, validation, callbacks and permission errors come from And
 the container does not invent an available network or report a failed registration as successful.
 These adapters do not confer system privileges on imported Google/account services.
 
+Private container broadcast shadows target only the host package in its actual Android user;
+virtual `ALL` does not mean other users on the phone. Sender/receiver permission restrictions,
+excluded recipients, callbacks and app-ops are retained for Android to enforce. This is internal
+message routing, not a grant of cross-user or privileged Google service permissions.
+
 Default output follows [direct USB negotiation](USB_OUTPUT.md); the advanced mode follows
 [the official bit-perfect contract](OFFICIAL_OUTPUT.md). An Android version alone does not prove
 that a device/DAC/format exposes either capability. Unsupported combinations are reported without

@@ -11,7 +11,18 @@ import top.niunaijun.blackbox.fake.hook.ClassInvocationStub;
 
 /** Attribute provider IPC to the actual caller, without changing queries or inventing results. */
 public final class ContentProviderStub extends ClassInvocationStub implements BContentProvider {
+    private static final Method COPY_WITH_PACKAGE = copyMethod();
     private IInterface base;
+
+    private static Method copyMethod() {
+        try {
+            // Unlike API 34's Builder(copy).build(), this retains PID, tag, token, renounced
+            // permissions and the downstream chain (plus deviceId on newer Android releases).
+            return AttributionSource.class.getDeclaredMethod("withPackageName", String.class);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Provider attribution copying is unavailable", error);
+        }
+    }
 
     @Override public IInterface wrapper(IInterface provider, String appPkg) {
         base = provider;
@@ -29,8 +40,7 @@ public final class ContentProviderStub extends ClassInvocationStub implements BC
         // Do not rewrite payload strings, Bundles, URIs, or downstream attribution identities.
         if (args != null && args.length > 0 && args[0] instanceof AttributionSource) {
             AttributionSource original = (AttributionSource) args[0];
-            AttributionSource caller = new AttributionSource.Builder(original)
-                    .setPackageName(BlackBoxCore.getHostPkg()).setNext(original.getNext()).build();
+            AttributionSource caller = (AttributionSource) COPY_WITH_PACKAGE.invoke(original, BlackBoxCore.getHostPkg());
             Object state = BRAttributionSource.get(caller).mAttributionSourceState();
             if (state == null) throw new IllegalStateException("Missing provider caller attribution state");
             BRAttributionSourceState.get(state)._set_uid(BlackBoxCore.getHostUid());

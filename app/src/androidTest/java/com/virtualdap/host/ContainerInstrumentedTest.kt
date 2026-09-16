@@ -191,6 +191,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("NETWORK STATE READY:")?.isNotEmpty() == true
             }
+            await("private USER_ALL broadcast stays within the active music space") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("PRIVATE BROADCAST ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("PRIVATE BROADCAST READY: music space only")?.isNotEmpty() == true
+            }
             await("declared media service and bounded failure of an unauthorized authenticator session") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")

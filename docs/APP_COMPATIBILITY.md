@@ -229,8 +229,7 @@ the successful APK imports do not override these failed runtime checks.
 ### Provider caller attribution (after alpha 3)
 
 The generic provider adapter now copies only the leading `AttributionSource`, using the actual
-host package/UID for IPC. It retains the original attribution tag, token and downstream chain;
-the Android 14 copy builder requires an explicit `setNext` to retain that chain. Query strings,
+host package/UID for IPC. Query strings,
 authorities, Bundles and other payloads are untouched. The real provider's results and exceptions
 are returned, with no synthesized Samsung/adult status or default success values.
 
@@ -246,6 +245,59 @@ force-stopping only VirtualDAP, without clearing app/emulator data, the unchange
 all **18 runtime tests in 101.410 seconds** on the ordinary-UID API 36 Google Play emulator.
 This rerun does not establish the cause of the initial connection timeout or successful Google
 login; the real YouTube Music/dependency checks remain separate.
+
+GitHub run `35106014207` subsequently passed the host and API 36 jobs but failed API 34:
+the copied attribution tag was null. AOSP Android 14's `Builder(copy).build()` resets fields
+whose setter bits are absent, including the copied PID, tag and renounced permissions, and
+replaces the token. The adapter now uses the platform's `withPackageName` copy operation instead;
+that operation retains these fields and the downstream chain (and device ID on newer releases).
+The regression now uses a non-default token, PID and renounced permission so default values cannot
+mask this loss. No token is invented by the production adapter.
+The combined attribution-copy/broadcast follow-up built with unit tests/lint in **4m 47s**,
+passed all **20 runtime tests in 110.877 seconds** on API 36, and passed the 25 prepared-source
+checks and packaged product boundary. API 34 CI must still confirm the platform-specific fix.
+
+The unchanged YouTube Music screen check after this correction failed in **51.440 seconds**:
+the requested screen appeared but did not remain visible for the required three seconds.
+The retained crash buffer showed GMS failing on the separate `USER_ALL` broadcast. No successful
+login or disappearance of every provider error is inferred from this one observation.
+
+### Private broadcast transport (after alpha 3)
+
+GMS's `USER_ALL` broadcast was already converted to a host-package-only shadow, but its final
+Android user argument remained `-1`. Android correctly rejected the ordinary host UID's cross-user
+request. The adapter now maps only this private transport to the host's actual Android user and
+records the current virtual user in its payload. `ALL`, `CURRENT` and `CURRENT_OR_SELF` mean only
+the active music space for this operation; a different explicit virtual user is rejected. A null
+shadow keeps the original OS arguments/checks. Unscoped or externally targeted shadows are rejected.
+
+The AOSP API 34/36 broadcast AIDL layouts are checked explicitly. Payloads, result callbacks,
+required/excluded permissions, excluded packages, app-op and options remain unchanged. Receiver
+registration no longer clears the app's requested sender permission. No Android cross-user
+permission is granted and no ordinary OS broadcast is silently promoted to a privileged one.
+
+A real guest fixture registers a receiver and sends a unique package-directed `USER_ALL` broadcast.
+The preceding host fails this unchanged test in **55.763 seconds**, retaining the same Android
+cross-user denial as GMS. Replacing only the host passes all **20 runtime tests in 106.105 seconds**,
+including delivery of the original nonce/destination, argument/restriction preservation, invalid
+destination rejection and the existing PCM checks. Build/unit/lint passed in **5m 2s**, with **125 JVM
+tests**, **25 prepared-source checks**, and the packaged product-boundary check passing. This local
+run preceded the separate API 34 attribution-copy follow-up and is not authentication evidence.
+
+The actual YouTube Music check with the broadcast correction still failed (**120.825 seconds**,
+Sign in label timeout). This run's retained crash buffer had no fatal exception, but logcat recorded
+two proxy-process ANRs and host GMS's `AccountChimeraContentProvider` rejecting VirtualDAP's actual
+signing identity (`GoogleCertificatesRslt: not allowed`). The lookup code still explicitly routes
+Google authorities to host providers, despite importing the real dependency APKs. That routing
+must be reviewed against the container's provider records; changing certificates or suppressing
+the provider's denial is not a valid substitute. The emulator was also compiling under memory/CPU
+pressure, so the ANRs alone do not isolate a production deadlock.
+
+An independent Apple Music host-app import in the same environment timed out before application
+launch (**86.734 seconds** total). The captured worker stack was inside `Deflater` called from
+`ApkArchiveNormalizer.normalizeIfArchive`: installed APK code is compressed into an outer archive
+and recompressed during normalization. Removing this redundant compression is a concrete import
+performance task, not evidence that Apple login now succeeds.
 
 ### Authenticator discovery before the first account
 
