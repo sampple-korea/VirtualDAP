@@ -30,8 +30,11 @@ class ProviderAttributionInstrumentedTest {
             .invoke(builder, 12347)
         AttributionSource.Builder::class.java.getDeclaredMethod("setRenouncedPermissions", Set::class.java)
             .invoke(builder, setOf("android.permission.CAMERA"))
-        val original = AttributionSource::class.java.getDeclaredMethod("withToken", IBinder::class.java)
-            .invoke(builder.build(), Binder()) as AttributionSource
+        val original = builder.build()
+        // API 34 has no withToken helper. Set a non-default fixture token on its private test
+        // object so the adapter still has to preserve it on every supported Android version.
+        val state = requireNotNull(black.android.content.BRAttributionSource.get(original).mAttributionSourceState())
+        state.javaClass.getDeclaredField("token").apply { isAccessible = true }.set(state, Binder())
         val extras = Bundle().apply { putString("payload", "com.example.guest") }
         val remoteError = SecurityException("fixture provider denied")
         val binder = Binder()

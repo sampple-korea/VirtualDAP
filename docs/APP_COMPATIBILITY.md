@@ -319,6 +319,11 @@ subscription agreement or account data was submitted.
 The unchanged full runtime suite then passed **20 tests in 100.047 seconds** on the same API 36
 emulator, with no build running alongside it.
 
+GitHub run `35109319897` passed host/API 36 but API 34 exposed a test-only portability issue:
+`AttributionSource.withToken` is absent there. The fixture now sets its own non-default token
+through its attribution-state field; production token handling is unchanged. The updated test
+passed locally on API 36, and its build/lint passed in **1m 7s**. API 34 remains a separate CI gate.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
