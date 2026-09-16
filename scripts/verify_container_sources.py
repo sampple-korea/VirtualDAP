@@ -51,6 +51,20 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_provider_adapter_changes_only_a_copy_of_the_actual_caller(self):
+        proxy = (JAVA / "fake/service/context/providers/ContentProviderStub.java").read_text()
+        self.assertIn("args[0] instanceof AttributionSource", proxy)
+        self.assertIn("new AttributionSource.Builder(original)", proxy)
+        self.assertIn(".setPackageName(BlackBoxCore.getHostPkg())", proxy)
+        self.assertIn(".setNext(original.getNext())", proxy)
+        self.assertIn("_set_uid(BlackBoxCore.getHostUid())", proxy)
+        self.assertIn("forwarded = args.clone()", proxy)
+        self.assertIn("return method.invoke(base, forwarded)", proxy)
+        self.assertIn("throw error.getCause()", proxy)
+        for fabricated in ("getSafeDefaultValue", "synthetic", "createSamsungAdult", "instanceof String",
+                           "fixAttributionSourceInBundle", "fixAttributionSourceInArgs", "return null"):
+            self.assertNotIn(fabricated, proxy)
+
     def test_connectivity_preserves_real_network_state_and_errors(self):
         proxy = (JAVA / "fake/service/IConnectivityManagerProxy.java").read_text()
         self.assertIn('case "requestNetwork": caller = 8;', proxy)

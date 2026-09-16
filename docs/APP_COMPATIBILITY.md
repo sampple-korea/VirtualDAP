@@ -199,6 +199,54 @@ user query timeout. The connectivity correction therefore resolves the independe
 false-network defect, not this login failure. Neither certificate checks nor WebView safety
 checks were disabled to change that result.
 
+### Google Play image comparison (September 16, 2026)
+
+Connectivity commit `a4c4f67` passed GitHub run `35078283694` (host and API 34/36 runtime).
+The earlier Google-APIs image's GMS APK has legacy test-certificate SHA-256
+`1975b2f17177bc89a5dff31f9e64a6cae281a53dc1d1d59b1d147fe1c82afa00`; importing it does not
+confer its preinstalled/system privileges. Rather than fabricating flags or accepting its
+certificate in app checks, a separate official Google Play emulator was used for comparison.
+ADB was recovered by dismissing a boot-time System UI ANR and restarting the host ADB server;
+the shell remains UID 2000, not root. Neither emulator's data was cleared.
+
+Actual installed GMS **26.33.32 (263332038)**, including all installed splits, imported in
+**71.089 seconds**; GSF imported in **17.241 seconds**, and Store **53.0.27-34 (85302740)**
+in **30.115 seconds**. The GMS base APK is 193,905,431 bytes, SHA-256
+`4837692410edcd67cd963d340e37083f210e97040f1a8c1e85732d706e1eaf27`, with current signer
+`5f2391277b1dbd489000467e4c2fa6af802430080457dce2f618992e9dfb5402` (Google Inc.). All are
+unmodified local inputs, not bundled/distributed. Import checks compare actual platform-parsed
+signing metadata, not authentication success.
+
+YouTube Music 8.09.50 still failed its visible **Sign in** check in **97.276 seconds**.
+Its dependencies exposed two concrete failures: GMS broadcast to Android user `-1` was denied
+cross-user privileges, and Store initialization failed in a provider query because its package
+did not belong to the actual host UID. The same normally installed YouTube Music reached its
+Sign in/Device files only welcome screen on this emulator without container hooks. No credentials
+were submitted. An initial shell command with incorrectly quoted `Sign in` did not start the
+instrumentation and is not a test result. Provider and broadcast routing require further fixes;
+the successful APK imports do not override these failed runtime checks.
+
+### Provider caller attribution (after alpha 3)
+
+The generic provider adapter now copies only the leading `AttributionSource`, using the actual
+host package/UID for IPC. It retains the original attribution tag, token and downstream chain;
+the Android 14 copy builder requires an explicit `setNext` to retain that chain. Query strings,
+authorities, Bundles and other payloads are untouched. The real provider's results and exceptions
+are returned, with no synthesized Samsung/adult status or default success values.
+
+The same new instrumentation test against the preceding host failed in **0.902 seconds** because
+the adapter mutated the caller's original attribution object. Against the new host it passed,
+checking copy isolation, chain/token retention, payloads, Binder identity and the exact remote
+`SecurityException`. The final build, unit tests and lint passed in **4m 24s**; all **125 JVM tests**,
+**24 prepared-source checks** and the packaged product-boundary check passed.
+
+The first full runtime run passed the provider test but timed out initializing the container
+(18 tests, one failure, **123.195 seconds**). No crash was retained in the crash buffer. After
+force-stopping only VirtualDAP, without clearing app/emulator data, the unchanged APKs passed
+all **18 runtime tests in 101.410 seconds** on the ordinary-UID API 36 Google Play emulator.
+This rerun does not establish the cause of the initial connection timeout or successful Google
+login; the real YouTube Music/dependency checks remain separate.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
