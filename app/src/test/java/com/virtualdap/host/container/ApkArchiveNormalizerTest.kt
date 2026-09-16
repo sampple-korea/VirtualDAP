@@ -23,6 +23,18 @@ class ApkArchiveNormalizerTest {
         textureCompressionFormats = listOf(10, 1),
     )
 
+    @Test fun normalizationPreservesApkBytesWithoutRecompressingThem() {
+        val bytes = ByteArray(131_073) { 42 }
+        val archive = zip("base.apk" to bytes)
+        val output = temporary.newFile("uncompressed-transport.apks")
+        assertTrue(ApkArchiveNormalizer.normalizeIfArchive(archive, output, profile, bytes.size.toLong()))
+        ZipFile(output).use { selected ->
+            val entry = selected.entries().asSequence().single()
+            org.junit.Assert.assertArrayEquals(bytes, selected.getInputStream(entry).use { it.readBytes() })
+            assertTrue(entry.compressedSize >= entry.size)
+        }
+    }
+
     @Test fun bundletoolTocSelectsOnlyTheCurrentProcessAbi() {
         val archive = zip(
             "toc.pb" to toc(

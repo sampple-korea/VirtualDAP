@@ -16,8 +16,6 @@ import com.virtualdap.host.service.PipelineStore
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 import com.virtualdap.host.model.MusicAppCatalog
 import com.virtualdap.host.model.GoogleServiceCatalog
 import java.util.concurrent.ConcurrentHashMap
@@ -243,29 +241,7 @@ object ContainerRuntime {
         }
         val info = context.packageManager.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
         val files = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty()
-        val bundle = File(staging, "installed-app.apks")
-        var total = 0L
-        FileOutputStream(bundle).use { stream ->
-            ZipOutputStream(stream).use { zip ->
-                files.forEachIndexed { index, path ->
-                    zip.putNextEntry(ZipEntry(if (index == 0) "base.apk" else "split-$index.apk"))
-                    File(path).inputStream().use { input ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            total += count
-                            require(total <= MAX_IMPORT_BYTES) { "Installed APK set exceeds 2 GiB" }
-                            zip.write(buffer, 0, count)
-                        }
-                    }
-                    zip.closeEntry()
-                }
-                zip.finish()
-                stream.fd.sync()
-            }
-        }
-        bundle
+        InstalledApkStager.stage(files.map(::File), staging, MAX_IMPORT_BYTES)
     }
 
     private fun importPackage(prepare: (Context, File) -> File) {

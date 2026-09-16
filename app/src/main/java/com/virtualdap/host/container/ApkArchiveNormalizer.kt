@@ -6,6 +6,7 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Locale
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -91,6 +92,8 @@ internal object ApkArchiveNormalizer {
 
             FileOutputStream(output).use { fileOutput ->
                 ZipOutputStream(fileOutput).use { normalized ->
+                    // Private, temporary transport only: preserve APK bytes without recompressing.
+                    normalized.setLevel(Deflater.NO_COMPRESSION)
                     var expanded = 0L
                     selectedPaths.forEachIndexed { index, path ->
                         validateEntryPath(path)

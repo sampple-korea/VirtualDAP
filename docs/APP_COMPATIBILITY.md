@@ -299,6 +299,26 @@ launch (**86.734 seconds** total). The captured worker stack was inside `Deflate
 and recompressed during normalization. Removing this redundant compression is a concrete import
 performance task, not evidence that Apple login now succeeds.
 
+### Installed APK staging performance
+
+Single installed APKs are now copied directly into private staging instead of wrapping and
+recompressing an outer archive. Split sets and normalized archives use no-compression deflate
+transport, retaining their APK bytes, aggregate size limits and subsequent signature/manifest
+checks. Temporary transport size may be larger; no APK is modified or re-signed. Five additional
+JVM regressions check byte preservation, split ordering, absence of recompression, aggregate
+limits, partial-file cleanup and existing-destination protection.
+
+Build, **130 JVM tests** and lint passed in **3m 7s**, together with 25 prepared-source checks and
+the APK boundary check. The same Apple Music 6.5.2 host-import command now completed installation
+and application startup; its 120-second process-inspection test passed in **151.544 seconds** total.
+This includes the inspection wait and is not an import-duration benchmark. The actual welcome
+screen and New tab's remote catalog were seen, but WebView initialization triggered an input ANR;
+no successful login is claimed. The retained main-thread trace was inside Trichrome/WebView
+browser startup. Only ordinary Continue and declining diagnostics were used; no credentials,
+subscription agreement or account data was submitted.
+The unchanged full runtime suite then passed **20 tests in 100.047 seconds** on the same API 36
+emulator, with no build running alongside it.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed
