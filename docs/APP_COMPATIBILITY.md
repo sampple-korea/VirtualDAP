@@ -324,6 +324,49 @@ GitHub run `35109319897` passed host/API 36 but API 34 exposed a test-only porta
 through its attribution-state field; production token handling is unchanged. The updated test
 passed locally on API 36, and its build/lint passed in **1m 7s**. API 34 remains a separate CI gate.
 
+### Container provider routing and Binder identity
+
+The previous provider resolver forwarded any authority containing a Google-services/Store string
+to Android's host provider resolver, even when the authority belonged to an imported application.
+Those substring branches are removed. Imported providers now follow the existing exact authority
+lookup for the active container user. Settings/media/telephony and explicitly open system packages
+retain their separate handling. Host Google account providers are not an implicit fallback when a
+dependency is absent; provider results, certificate decisions and permission denials are not faked.
+
+A fixture declares three distinct private authorities containing the affected substrings, all in
+its own separate provider process. It checks the actual process/package, unchanged payload and a
+deliberate `SecurityException`. The preceding host logged `Failed to find provider info` and displayed
+`Unknown authority`; its automated comparison was obscured by emulator launcher/System UI ANRs
+and timed out at the earlier new-intent assertion (82.309 / 76.212 seconds), so these are not clean
+assertion-level routing baselines. An earlier attempt was interrupted by emulator process exit,
+and one boot-time attempt ended before the host finished startup. Emulator data was retained.
+
+Removing only the routing branches exposed another real defect: the fixture provider process
+received the IPC but rejected `Calling uid: 10005 doesn't match source uid: 10217`. That full suite
+ran **20 tests with one failure in 58.481 seconds**. The inherited Binder callback replaced the real
+kernel UID with a virtual package UID (and even had a stack-based system-UID fallback). It now
+returns the original UID unchanged; virtual package/user IDs remain explicit container records.
+The provider fixture also compares the real caller and process UIDs. No attribution validation or
+permission check is disabled to make the call succeed.
+
+The combined build/unit/lint passed in **5m 23s**, but its initial runtime check still failed
+(20 tests, one failure, **127.526 seconds**). A diagnostic rerun (**29.084 seconds**) showed that
+provider routing, payload and distinct process were correct: Binder reported the real UID 10217,
+while the fixture compared it to Java `Process.myUid()` reporting the virtual package UID 10005.
+The fixture now reads `getuid()` through its own tiny JNI helper for the kernel-identity assertion;
+it does not loosen the assertion or treat a virtual package identifier as an OS permission grant.
+
+With that kernel-UID fixture, the ordinary-UID API 36 suite passed all **20 tests in 99.661 seconds**.
+The final test APK/lint build passed in **2m 1s**; the production build had passed 130 JVM tests,
+and all 26 prepared-source checks passed. The preceding attribution portability commit `68dab92`
+also passed GitHub run `35115178215` on host, API 34 and API 36; that CI result does not include
+the new provider-routing changes.
+
+The unmodified YouTube Music 8.09.50 APK, using the imported Google services in the ordinary
+Google Play API 36 emulator, then passed its exact visible `Sign in` screen check and 30-second
+process-inspection window in **130.891 seconds**. This is startup-screen evidence, not a completed
+Google account login, DRM/subscription playback, PCM capture or physical USB-output result.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed

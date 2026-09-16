@@ -145,6 +145,19 @@ def prepare(upstream, dobby, overrides, output):
     shutil.copytree(dobby, dobby_output, ignore=shutil.ignore_patterns(".git", "build"))
 
     package = output / "java/top/niunaijun/blackbox"
+    native_core = package / "core/NativeCore.java"
+    content = native_core.read_text(encoding="utf-8")
+    begin = content.index("    public static int getCallingUid(int origCallingUid)")
+    end = content.index("    @Keep", begin)
+    content = content[:begin] + '''    public static int getCallingUid(int origCallingUid) {
+        // Binder identity is a kernel fact, not a virtual package ID. Framework provider
+        // attribution and permission checks must see the actual caller, never SYSTEM_UID.
+        // Container package/user IDs remain in explicit container service records.
+        return origCallingUid;
+    }
+
+''' + content[end:]
+    native_core.write_text(content, encoding="utf-8")
     # Synthetic accounts/tokens and fabricated package metadata cannot provide real service
     # compatibility. Keep the ordinary account-service implementation and real package records.
     hooks = package / "fake/hook/HookManager.java"
@@ -371,6 +384,15 @@ def prepare(upstream, dobby, overrides, output):
 
     activity_proxy = package / "fake/service/IActivityManagerProxy.java"
     content = activity_proxy.read_text(encoding="utf-8")
+    # Imported service providers must resolve from the active container, not phone account data.
+    # An authority substring is not evidence that a host provider is an appropriate substitute.
+    for host_google_condition in (
+        '                        || ((String) auth).contains("com.google.android.gms")\n',
+        '                        || ((String) auth).contains("com.android.vending")\n',
+        '                        || ((String) auth).contains("com.google.android.gsf")\n',
+        '                        || auth.equals("com.google.android.gms.chimera")\n',
+    ):
+        content = replace_once(content, host_google_condition, "")
     content = replace_once(
         content, '                if ("media".equals(auth)) {',
         '                if ((BlackBoxCore.getHostPkg() + ".container.events").equals(auth)) {\n'

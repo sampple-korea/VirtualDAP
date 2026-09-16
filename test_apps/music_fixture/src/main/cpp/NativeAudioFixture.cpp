@@ -3,6 +3,7 @@
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,11 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_virtualdap_fixture_music_MusicFixtureActivity_kernelUid(JNIEnv *, jclass) {
+    return static_cast<jint>(getuid());
+}
 
 namespace {
 

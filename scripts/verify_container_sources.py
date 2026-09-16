@@ -51,6 +51,20 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_imported_google_authorities_do_not_escape_to_host_account_providers(self):
+        activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
+        for authority in ("com.google.android.gms", "com.google.android.gsf", "com.android.vending"):
+            self.assertNotIn('((String) auth).contains("' + authority + '")', activity)
+        self.assertNotIn('auth.equals("com.google.android.gms.chimera")', activity)
+        self.assertIn("BlackBoxCore.getBPackageManager()", activity)
+        self.assertIn(".acquireContentProviderClient(providerInfo)", activity)
+        native = (JAVA / "core/NativeCore.java").read_text()
+        begin = native.index("    public static int getCallingUid(int origCallingUid)")
+        caller = native[begin:native.index("    @Keep", begin)]
+        self.assertIn("return origCallingUid;", caller)
+        self.assertNotIn("getCallingBUid()", caller)
+        self.assertNotIn("return Process.SYSTEM_UID", caller)
+
     def test_private_broadcast_routing_preserves_os_restrictions(self):
         activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
         begin = activity.index('    @ProxyMethod("broadcastIntent")')

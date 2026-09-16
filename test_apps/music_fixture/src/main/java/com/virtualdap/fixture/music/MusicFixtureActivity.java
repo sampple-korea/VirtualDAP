@@ -22,6 +22,7 @@ public final class MusicFixtureActivity extends Activity {
     private static native String playAaudioBlockingNative();
     private static native String playOpenSlNative();
     private static native String rejectUnsupportedNative();
+    static native int kernelUid();
 
     private volatile boolean playing;
     // Main-thread state: socket closure can precede the worker's final resource release.
@@ -63,6 +64,42 @@ public final class MusicFixtureActivity extends Activity {
         TextView networkStatus = new TextView(this);
         networkStatus.setText("NETWORK STATE: pending");
         content.addView(networkStatus);
+        TextView providerStatus = new TextView(this);
+        providerStatus.setText("PRIVATE PROVIDER: pending");
+        content.addView(providerStatus);
+        new Thread(() -> {
+            String result;
+            try {
+                String nonce = java.util.UUID.randomUUID().toString();
+                Bundle extras = new Bundle();
+                extras.putString("nonce", nonce);
+                for (String name : new String[]{"com.google.android.gms", "com.google.android.gsf", "com.android.vending"}) {
+                    android.net.Uri uri = android.net.Uri.parse("content://com.virtualdap.fixture." + name + ".provider");
+                    Bundle reply = getContentResolver().call(uri, "probe", getPackageName(), extras);
+                    if (reply == null || !getPackageName().equals(reply.getString("package"))
+                            || !getPackageName().equals(reply.getString("arg"))
+                            || !nonce.equals(reply.getString("nonce"))
+                            || reply.getInt("pid") <= 0 || reply.getInt("pid") == android.os.Process.myPid()
+                            || reply.getInt("callerUid") != kernelUid()
+                            || reply.getInt("processUid") != kernelUid()) {
+                        throw new IllegalStateException("Wrong provider, process or request payload: reply=" + reply
+                                + ", expectedPackage=" + getPackageName() + ", callerPid=" + android.os.Process.myPid()
+                                + ", callerUid=" + kernelUid() + ", nonce=" + nonce);
+                    }
+                    try {
+                        getContentResolver().call(uri, "deny", null, null);
+                        throw new IllegalStateException("Provider denial was replaced with success");
+                    } catch (SecurityException denied) {
+                        if (!"fixture provider denied".equals(denied.getMessage())) throw denied;
+                    }
+                }
+                result = "PRIVATE PROVIDER READY: local process / real denial";
+            } catch (RuntimeException failure) {
+                result = "PRIVATE PROVIDER ERROR: " + failure;
+            }
+            final String outcome = result;
+            runOnUiThread(() -> providerStatus.setText(outcome));
+        }, "fixture-provider-probe").start();
         try {
             android.net.ConnectivityManager networks = getSystemService(android.net.ConnectivityManager.class);
             android.os.Parcel networkParcel = android.os.Parcel.obtain();

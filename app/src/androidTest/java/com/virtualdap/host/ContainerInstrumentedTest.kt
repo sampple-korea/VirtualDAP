@@ -191,6 +191,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("NETWORK STATE READY:")?.isNotEmpty() == true
             }
+            await("imported providers use their actual container process, not authority-substring host routing") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("PRIVATE PROVIDER ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("PRIVATE PROVIDER READY: local process / real denial")?.isNotEmpty() == true
+            }
             await("private USER_ALL broadcast stays within the active music space") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("PRIVATE BROADCAST ERROR:")?.firstOrNull()?.text
