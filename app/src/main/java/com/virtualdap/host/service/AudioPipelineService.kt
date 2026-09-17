@@ -26,6 +26,7 @@ import com.virtualdap.host.audio.RoutedAudioSink
 import com.virtualdap.host.audio.usb.UsbHostController
 import com.virtualdap.host.model.OutputRoutePolicy
 import com.virtualdap.host.model.OutputMode
+import com.virtualdap.host.model.OutputTestPhase
 import com.virtualdap.host.audio.DsdContainerReader
 import com.virtualdap.host.audio.DsdDopPacketOutput
 import com.virtualdap.host.audio.DsdOutputMode
@@ -186,7 +187,7 @@ class AudioPipelineService : Service() {
     }
 
     private fun selectRoute(routeId: Int) {
-        if (activeDsd != null) {
+        if (activeDsd != null || selfTestRunning.get()) {
             PipelineStore.log("Output changes are locked during local DSD playback", LogLevel.WARNING)
             return
         }
@@ -237,7 +238,12 @@ class AudioPipelineService : Service() {
         }
         if (!selfTestRunning.compareAndSet(false, true)) return
         if (bridge == null) startPipeline()
-        if (!serviceStarted) { selfTestRunning.set(false); return }
+        if (!serviceStarted) {
+            selfTestRunning.set(false)
+            PipelineStore.update { it.copy(outputTestPhase = OutputTestPhase.ERROR) }
+            return
+        }
+        PipelineStore.update { it.copy(outputTestPhase = OutputTestPhase.RUNNING, lastError = null) }
         updatePlaybackWakeLock(true)
         thread(name = "VirtualDAP-self-test") {
             val format = PcmFormat(48_000, 2, PcmEncoding.PCM_16)
@@ -262,13 +268,24 @@ class AudioPipelineService : Service() {
                     testSink.write(packet)
                 }
                 testSink.finish()
+                PipelineStore.update { it.copy(outputTestPhase = OutputTestPhase.COMPLETED) }
                 PipelineStore.log("Output self-test completed")
             } catch (error: Exception) {
-                if (!PipelineStore.state.value.guestConnected) fail("Output self-test failed: ${error.message}")
+                PipelineStore.update { it.copy(outputTestPhase = OutputTestPhase.ERROR) }
+                if (!PipelineStore.state.value.guestConnected) fail("출력 소리 테스트 실패: ${error.message}")
             } finally {
-                testSink.close()
-                selfTestRunning.set(false)
-                mainHandler.post { updatePlaybackWakeLock(serviceStarted && PipelineStore.state.value.playingStreams > 0) }
+                try {
+                    testSink.close()
+                } catch (error: Exception) {
+                    PipelineStore.update { it.copy(outputTestPhase = OutputTestPhase.ERROR) }
+                    fail("출력 장치 정리 실패: ${error.message}")
+                } finally {
+                    PipelineStore.update {
+                        if (it.outputTestPhase == OutputTestPhase.RUNNING) it.copy(outputTestPhase = OutputTestPhase.CANCELLED) else it
+                    }
+                    selfTestRunning.set(false)
+                    mainHandler.post { updatePlaybackWakeLock(serviceStarted && PipelineStore.state.value.playingStreams > 0) }
+                }
             }
         }
     }

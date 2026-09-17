@@ -11,15 +11,19 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Usb
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,6 +50,7 @@ import com.virtualdap.host.service.AudioPipelineService
 import com.virtualdap.host.service.OutputSupportPresentation
 import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.host.ui.theme.VirtualDAPTheme
+import com.virtualdap.host.ui.MusicInteraction
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -90,6 +95,7 @@ private fun VirtualDAPApp() {
     var outputTab by rememberSaveable { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var tool by rememberSaveable { mutableStateOf<String?>(null) }
+    BackHandler(enabled = outputTab && tool == null && !menuOpen) { outputTab = false }
     var pendingAction by rememberSaveable { mutableStateOf(AudioPipelineService.ACTION_START) }
     var pendingPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var dsdUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -218,9 +224,19 @@ private fun VirtualDAPApp() {
                             Text("선택한 출력으로 낮은 음량의 440 Hz 소리를 2초간 재생합니다. 음악 앱이나 전체 경로의 검증은 아닙니다.")
                             Spacer(Modifier.height(12.dp))
                             Button(onClick = { start(AudioPipelineService.ACTION_SELF_TEST) },
-                                enabled = !audio.guestConnected && !audio.dsdPlayback.active && OutputRoutePolicy.selected(audio) != null) {
-                                Text("소리 테스트 시작")
+                                enabled = audio.outputTestPhase != OutputTestPhase.RUNNING && !audio.guestConnected && !audio.dsdPlayback.active && OutputRoutePolicy.selected(audio) != null) {
+                                Text(if (audio.outputTestPhase == OutputTestPhase.RUNNING) "테스트 중…" else "소리 테스트 시작")
                             }
+                            Text(when (audio.outputTestPhase) {
+                                OutputTestPhase.IDLE -> "아직 실행하지 않았습니다."
+                                OutputTestPhase.RUNNING -> "선택한 장치로 테스트 소리를 보내는 중입니다."
+                                OutputTestPhase.COMPLETED -> "테스트 전송을 완료했습니다. 실제로 소리가 들렸는지 확인해 주세요."
+                                OutputTestPhase.CANCELLED -> "테스트가 중지되었습니다."
+                                OutputTestPhase.ERROR -> "테스트에 실패했습니다. 아래 오류를 확인해 주세요."
+                            })
+                            if (OutputRoutePolicy.selected(audio) == null) Text("오디오 출력에서 장치를 먼저 선택해 주세요.")
+                            if (audio.guestConnected || audio.dsdPlayback.active) Text("먼저 음악 앱 또는 로컬 DSD 재생을 중지해 주세요.")
+                            audio.lastError?.let { ErrorText(it) }
                         }
                         else -> item {
                             Text("DSF / DSDIFF 파일용 보조 도구입니다. 음악 서비스는 기본 화면에서 실행하세요.")
@@ -229,22 +245,25 @@ private fun VirtualDAPApp() {
                             DsdOutputMode.entries.filter {
                                 audio.outputMode == OutputMode.USB || it != DsdOutputMode.NATIVE_DSD
                             }.forEach { mode ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    RadioButton(selected = dsdMode == mode, onClick = { dsdMode = mode; dsdConfirmed = false },
-                                        enabled = !audio.dsdPlayback.active)
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                                    selected = dsdMode == mode, enabled = !audio.dsdPlayback.active, role = Role.RadioButton,
+                                    onClick = { dsdMode = mode; dsdConfirmed = false }), verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selected = dsdMode == mode, onClick = null, enabled = !audio.dsdPlayback.active)
                                     Text(dsdModeName(mode))
                                 }
                             }
                             if (dsdMode != DsdOutputMode.PCM_CONVERSION) {
                                 Text("DoP / 네이티브 DSD는 소프트웨어 볼륨을 적용하지 않습니다. DAC의 지원과 안전한 하드웨어 음량을 먼저 확인하세요.")
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = dsdConfirmed, onCheckedChange = { dsdConfirmed = it })
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                                    value = dsdConfirmed, enabled = !audio.dsdPlayback.active, role = Role.Checkbox,
+                                    onValueChange = { dsdConfirmed = it }), verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = dsdConfirmed, onCheckedChange = null, enabled = !audio.dsdPlayback.active)
                                     Text("DAC 지원 및 음량을 확인했습니다")
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { start(AudioPipelineService.ACTION_PLAY_DSD) }, enabled = dsdUri != null &&
-                                    !audio.dsdPlayback.active && !audio.guestConnected && OutputRoutePolicy.selected(audio) != null &&
+                                    !audio.dsdPlayback.active && !audio.guestConnected && audio.outputTestPhase != OutputTestPhase.RUNNING && OutputRoutePolicy.selected(audio) != null &&
                                     (audio.outputMode == OutputMode.USB || dsdMode != DsdOutputMode.NATIVE_DSD) &&
                                     (dsdMode == DsdOutputMode.PCM_CONVERSION || dsdConfirmed)) { Text("재생") }
                                 TextButton(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP_DSD) },
@@ -258,6 +277,8 @@ private fun VirtualDAPApp() {
                                 }
                             }
                             Text("진행 ${(audio.dsdPlayback.progress * 100).toInt()}%")
+                            LinearProgressIndicator(progress = { audio.dsdPlayback.progress }, modifier = Modifier.fillMaxWidth())
+                            audio.dsdPlayback.qualification?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                             audio.dsdPlayback.lastError?.let { ErrorText(it) }
                         }
                     }
@@ -270,7 +291,19 @@ private fun VirtualDAPApp() {
 private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImport: () -> Unit,
     onLaunch: (String) -> Unit, onOutput: () -> Unit) {
     var showHostApps by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var removePackage by rememberSaveable { mutableStateOf<String?>(null) }
     val ready = apps.phase == ContainerPhase.READY
+    val filteredApps = apps.musicApplications.filter { MusicInteraction.matches(it, query) }
+    apps.musicApplications.firstOrNull { it.packageName == removePackage }?.let { app ->
+        AlertDialog(onDismissRequest = { removePackage = null }, title = { Text("${app.name} 삭제") },
+            text = { Text("음악 공간 안의 이 앱과 로그인 정보·다운로드 등 앱 데이터가 삭제됩니다. 되돌릴 수 없습니다. 휴대폰에 원래 설치한 앱과 데이터는 유지됩니다.") },
+            confirmButton = { TextButton(enabled = ready, onClick = {
+                ContainerRuntime.remove(app.packageName)
+                removePackage = null
+            }) { Text("음악 공간에서 삭제") } },
+            dismissButton = { TextButton(onClick = { removePackage = null }) { Text("취소") } })
+    }
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("음악을 시작하세요", style = MaterialTheme.typography.headlineMedium)
@@ -303,6 +336,7 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
             }
             if (!ready) Text(when (apps.phase) {
                 ContainerPhase.INSTALLING -> "음악 앱을 추가하는 중입니다…"
+                ContainerPhase.REMOVING -> "음악 공간에서 앱을 삭제하는 중입니다…"
                 ContainerPhase.ERROR -> "음악 공간을 불러오지 못했습니다. 다시 시도해 주세요."
                 else -> "음악 공간을 준비하는 중입니다…"
             })
@@ -314,12 +348,41 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
                 Text("APK / APKS 파일을 선택하거나, 휴대폰에 설치된 음악 앱을 가져오세요. 기존 계정과 앱 데이터는 복사하지 않습니다.")
             }
         }
-        items(apps.musicApplications, key = { it.packageName }) { app ->
+        if (apps.musicApplications.isNotEmpty()) item {
+            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                label = { Text("추가한 음악 앱 검색") }, modifier = Modifier.fillMaxWidth(),
+                trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("지우기") } })
+        }
+        if (query.isNotBlank() && filteredApps.isEmpty()) item { Text("검색 결과가 없습니다. 앱 이름이나 패키지 이름을 확인해 주세요.") }
+        items(filteredApps, key = { it.packageName }) { app ->
             Section(app.name) {
-                Text(if (app.lastStartedPid != null) "시작됨 · 재생 상태는 앱에서 확인" else "실행 준비", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { onLaunch(app.packageName) }, enabled = ready && OutputRoutePolicy.selected(audio) != null && !audio.dsdPlayback.active) { Text("앱 열기") }
+                val blocked = MusicInteraction.launchBlock(apps.phase, app, audio)
+                var appMenuOpen by remember { mutableStateOf(false) }
+                Text(when {
+                    app.starting -> "앱을 여는 중입니다…"
+                    app.lastStartedPid != null -> "시작됨 · 재생 상태는 앱에서 확인"
+                    else -> "실행 준비"
+                }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (blocked != null && !app.starting) Text(blocked, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { onLaunch(app.packageName) }, enabled = blocked == null) { Text("앱 열기") }
                     TextButton(onClick = { ContainerRuntime.stop(app.packageName) }, enabled = ready) { Text("앱 중지") }
+                    Spacer(Modifier.weight(1f))
+                    Box {
+                        IconButton(onClick = { appMenuOpen = true }, enabled = ready) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "${app.name} 관리")
+                        }
+                        DropdownMenu(expanded = appMenuOpen, onDismissRequest = { appMenuOpen = false }) {
+                            if (apps.hostApplications.any { it.packageName == app.packageName }) {
+                                DropdownMenuItem(text = { Text("휴대폰 버전으로 업데이트") }, onClick = {
+                                    appMenuOpen = false; ContainerRuntime.importHostApp(app.packageName)
+                                })
+                            }
+                            DropdownMenuItem(text = { Text("음악 공간에서 삭제") }, onClick = {
+                                appMenuOpen = false; removePackage = app.packageName
+                            })
+                        }
+                    }
                 }
             }
         }
@@ -329,7 +392,9 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
             items(apps.hostApplications, key = { "host-${it.packageName}" }) { app ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(app.name, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { ContainerRuntime.importHostApp(app.packageName) }, enabled = ready) { Text("가져오기") }
+                    TextButton(onClick = { ContainerRuntime.importHostApp(app.packageName) }, enabled = ready) {
+                        Text(if (apps.applications.any { it.packageName == app.packageName }) "업데이트" else "가져오기")
+                    }
                 }
             }
         }
@@ -343,7 +408,7 @@ private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImpo
 @Composable
 private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
     val context = LocalContext.current
-    val locked = audio.enabled || audio.dsdPlayback.active
+    val locked = audio.enabled || audio.dsdPlayback.active || audio.outputTestPhase == OutputTestPhase.RUNNING
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("오디오 출력", style = MaterialTheme.typography.headlineLarge)
@@ -352,7 +417,7 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
         item {
             Section("재생 모드") {
                 OutputMode.entries.forEach { mode ->
-                    Row(modifier = Modifier.fillMaxWidth().selectable(
+                    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(
                         selected = audio.outputMode == mode, enabled = !locked, role = Role.RadioButton,
                         onClick = { AudioPipelineService.selectMode(context, mode) }), verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = audio.outputMode == mode, enabled = !locked, onClick = null)
@@ -369,10 +434,12 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
         if (audio.outputMode == OutputMode.USB) {
             item {
                 Section("USB 음량 ${(audio.usbGain * 100).toInt()}%") {
-                    Slider(value = audio.usbGain, onValueChange = { gain ->
+                    val bypassed = MusicInteraction.bypassesSoftwareVolume(audio)
+                    Slider(value = audio.usbGain, enabled = !bypassed, onValueChange = { gain ->
                         PipelineStore.update { it.copy(usbGain = gain, bitPerfectActive = false) }
                     })
                     Text("초기 음량은 25%입니다. Android 시스템 음량과 별도로 적용됩니다. 100% 미만에서는 소프트웨어 음량 조절로 원본 비트가 변경됩니다.", style = MaterialTheme.typography.bodySmall)
+                    if (bypassed) Text("현재 DoP / 네이티브 DSD 전송에는 이 음량이 적용되지 않습니다. DAC의 하드웨어 음량을 사용하세요.", color = MaterialTheme.colorScheme.primary)
                 }
             }
             if (usb.devices.isEmpty()) item { Text("USB DAC 또는 USB 이어폰을 연결해 주세요.") }
@@ -383,7 +450,7 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
                     else {
                         val route = audio.availableRoutes.firstOrNull { it.directUsbDeviceId == device.id }
                         Button(onClick = { route?.let { AudioPipelineService.command(context, AudioPipelineService.ACTION_SELECT_ROUTE, it.id) } },
-                            enabled = route != null && !audio.dsdPlayback.active) {
+                            enabled = route != null && !audio.dsdPlayback.active && audio.outputTestPhase != OutputTestPhase.RUNNING) {
                             Text(if (route?.id == audio.selectedRouteId) "선택됨" else "이 장치로 출력")
                         }
                         Text("지원 포맷은 DAC와 협상합니다. 필요한 변환은 실제 출력 정보에 표시됩니다.", style = MaterialTheme.typography.bodySmall)
@@ -396,7 +463,7 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
                 Section("${route.name} · ${routeKind(route)}") {
                     Text(OutputSupportPresentation.officialStatus(route))
                     Button(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_SELECT_ROUTE, route.id) },
-                        enabled = OutputRoutePolicy.eligible(route, audio.outputMode) && !audio.dsdPlayback.active) {
+                        enabled = OutputRoutePolicy.eligible(route, audio.outputMode) && !audio.dsdPlayback.active && audio.outputTestPhase != OutputTestPhase.RUNNING) {
                         Text(if (audio.selectedRouteId == route.id) "선택됨" else "선택")
                     }
                 }
@@ -422,7 +489,9 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
     }
 }
 @Composable private fun ErrorText(message: String) {
-    Text("작업을 완료하지 못했습니다.\n$message", color = MaterialTheme.colorScheme.error)
+    SelectionContainer {
+        Text("작업을 완료하지 못했습니다.\n$message", color = MaterialTheme.colorScheme.error)
+    }
 }
 private fun routeKind(route: OutputRoute): String = when (route.type) {
     AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "내장 스피커"

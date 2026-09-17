@@ -15,6 +15,7 @@ enum class PipelinePhase {
 
 enum class LogLevel { INFO, WARNING, ERROR }
 enum class OutputMode { USB, OFFICIAL_BIT_PERFECT }
+enum class OutputTestPhase { IDLE, RUNNING, COMPLETED, CANCELLED, ERROR }
 
 enum class DsdPlaybackPhase {
     IDLE,
@@ -99,5 +100,6 @@ data class PipelineSnapshot(
     val latencyMs: Double? = null,
     val lastError: String? = null,
     val dsdPlayback: DsdPlaybackSnapshot = DsdPlaybackSnapshot(),
+    val outputTestPhase: OutputTestPhase = OutputTestPhase.IDLE,
     val logs: List<PipelineLog> = emptyList(),
 )

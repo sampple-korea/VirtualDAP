@@ -373,6 +373,14 @@ class ContainerInstrumentedTest {
             } finally {
                 corrupted.delete()
             }
+            val otherPackages = ContainerRuntime.state.value.applications.map { it.packageName }.toSet() - FIXTURE
+            ContainerRuntime.remove(FIXTURE)
+            await("remove only the fixture copy from the music space") {
+                ContainerRuntime.state.value.phase != ContainerPhase.REMOVING
+            }
+            assertEquals(null, ContainerRuntime.state.value.lastError)
+            assertEquals(otherPackages, ContainerRuntime.state.value.applications.map { it.packageName }.toSet())
+            assertEquals(false, top.niunaijun.blackbox.BlackBoxCore.get().isInstalled(FIXTURE, 0))
         } finally {
             capture.close()
             fixture.delete()

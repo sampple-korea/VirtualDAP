@@ -33,7 +33,7 @@ import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback
 import top.niunaijun.blackbox.app.configuration.ClientConfiguration
 
 enum class ContainerPhase {
-    INITIALIZING, READY, INSTALLING, ERROR;
+    INITIALIZING, READY, INSTALLING, REMOVING, ERROR;
 
     val canRefresh: Boolean get() = this == READY || this == ERROR
 }
@@ -43,6 +43,7 @@ data class ContainerApp(
     val name: String,
     val minimumApi: Int,
     val lastStartedPid: Int? = null,
+    val starting: Boolean = false,
 )
 
 data class ContainerSnapshot(
@@ -56,6 +57,9 @@ data class ContainerSnapshot(
 ) {
     val musicApplications: List<ContainerApp> get() = applications.filterNot { GoogleServiceCatalog.contains(it.packageName) }
 
+    internal fun canRemove(packageName: String): Boolean = phase == ContainerPhase.READY &&
+        !GoogleServiceCatalog.contains(packageName) && applications.any { it.packageName == packageName }
+
     internal fun activityChanged(activity: ContainerActivity, resumed: Boolean): ContainerSnapshot = when {
         applications.none { it.packageName == activity.packageName } -> this
         resumed -> copy(foregroundActivity = activity)
@@ -66,7 +70,7 @@ data class ContainerSnapshot(
     internal fun appStopped(packageName: String) = copy(
         detail = "Stopped $packageName",
         applications = applications.map { app ->
-            if (app.packageName == packageName) app.copy(lastStartedPid = null) else app
+            if (app.packageName == packageName) app.copy(lastStartedPid = null, starting = false) else app
         },
         foregroundActivity = foregroundActivity?.takeUnless { it.packageName == packageName },
     )
@@ -206,6 +210,7 @@ object ContainerRuntime {
 
     fun refresh() {
         if (!attached) return
+        if (!mutableState.value.phase.canRefresh) return
         if (!controlBound) { bindControl(); return }
         scope.launch {
             try { loadApplications() } catch (error: Exception) { fail("Could not read music apps: ${error.message}") }
@@ -297,10 +302,10 @@ object ContainerRuntime {
         if (mutableState.value.phase != ContainerPhase.READY) return
         val request = UUID.randomUUID().toString()
         val previousPid = mutableState.value.applications.firstOrNull { it.packageName == packageName }?.lastStartedPid
-        pendingLaunches[packageName] = request
+        if (pendingLaunches.putIfAbsent(packageName, request) != null) return
         mutableState.update { it.copy(
             applications = it.applications.map { app ->
-                if (app.packageName == packageName) app.copy(lastStartedPid = null) else app
+                if (app.packageName == packageName) app.copy(lastStartedPid = null, starting = true) else app
             },
             detail = "Starting $packageName", lastError = null,
         ) }
@@ -329,6 +334,9 @@ object ContainerRuntime {
                         "$packageName did not finish startup. Check app/Android/CPU compatibility and Diagnostics."
                     } else "Could not launch $packageName: ${error.message}"
                     mutableState.update { it.copy(
+                        applications = it.applications.map { app ->
+                            if (app.packageName == packageName) app.copy(starting = false) else app
+                        },
                         lastError = message,
                         detail = if (error is MusicOutputUnavailable) "Audio output not ready" else "App startup failed",
                     ) }
@@ -350,12 +358,34 @@ object ContainerRuntime {
         }
     }
 
+    /** Removes only the selected copy in user 0; never uninstalls the phone's original app. */
+    fun remove(packageName: String) {
+        val previous = mutableState.value
+        if (!previous.canRemove(packageName) || !mutableState.compareAndSet(previous, previous.copy(
+                phase = ContainerPhase.REMOVING, lastError = null, detail = "음악 공간에서 앱을 삭제하는 중입니다",
+            ))) return
+        pendingLaunches.remove(packageName)
+        scope.launch {
+            try {
+                val core = BlackBoxCore.get()
+                core.stopPackage(packageName, USER)
+                core.uninstallPackageAsUser(packageName, USER)
+                check(!core.isInstalled(packageName, USER)) { "음악 공간에서 앱을 삭제하지 못했습니다" }
+                mutableState.update { it.appStopped(packageName) }
+                loadApplications()
+            } catch (error: Exception) {
+                mutableState.update { it.copy(phase = ContainerPhase.READY,
+                    lastError = "앱 삭제 실패: ${error.message ?: error.javaClass.simpleName}") }
+            }
+        }
+    }
+
     fun appStarted(packageName: String, pid: Int) {
         mutableState.update {
             it.copy(
                 detail = "$packageName started",
                 applications = it.applications.map { app ->
-                    if (app.packageName == packageName) app.copy(lastStartedPid = pid) else app
+                    if (app.packageName == packageName) app.copy(lastStartedPid = pid, starting = false) else app
                 },
                 lastError = null,
             )
@@ -378,6 +408,7 @@ object ContainerRuntime {
                 name = runCatching { info.loadLabel(context.packageManager).toString() }.getOrDefault(info.packageName),
                 minimumApi = info.minSdkVersion,
                 lastStartedPid = previous[info.packageName]?.lastStartedPid?.takeIf { it in runningPids },
+                starting = pendingLaunches.containsKey(info.packageName),
             )
         }.sortedBy { it.name.lowercase() }
         mutableState.value = ContainerSnapshot(

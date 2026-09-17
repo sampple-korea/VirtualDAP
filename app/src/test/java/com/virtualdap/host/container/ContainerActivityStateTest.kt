@@ -43,4 +43,21 @@ class ContainerActivityStateTest {
         assertNull(stopped.applications.first().lastStartedPid)
         assertEquals(456, stopped.applications.last().lastStartedPid)
     }
+
+    @Test fun removalRequiresReadyAndAnInstalledNonServiceTarget() {
+        val ready = state.copy(phase = ContainerPhase.READY)
+        assertTrue(ready.canRemove(first.packageName))
+        assertFalse(ready.canRemove("com.example.missing"))
+        assertFalse(ready.copy(phase = ContainerPhase.INSTALLING).canRemove(first.packageName))
+        assertFalse(ready.copy(phase = ContainerPhase.REMOVING).canRemove(first.packageName))
+        val services = ready.copy(applications = listOf(ContainerApp("com.google.android.gms", "Services", 34)))
+        assertFalse(services.canRemove("com.google.android.gms"))
+    }
+
+    @Test fun stopClearsPendingLaunchPresentation() {
+        val starting = state.copy(applications = state.applications.map { it.copy(starting = true) })
+        val stopped = starting.appStopped(first.packageName)
+        assertFalse(stopped.applications.first().starting)
+        assertTrue(stopped.applications.last().starting)
+    }
 }

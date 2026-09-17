@@ -62,6 +62,13 @@ class UsbModeInstrumentedTest {
         await("login dependency setup") { visible("Google 서비스 프레임워크") }
         assertFalse(visible("앱 열기"))
         click("닫기")
+        click("도구")
+        click("출력 소리 테스트")
+        await("missing output has an actionable explanation inside the tool") {
+            visible("오디오 출력에서 장치를 먼저 선택해 주세요.") && visible("아직 실행하지 않았습니다.")
+        }
+        assertFalse(requireNotNull(findText("소리 테스트 시작")).isEnabled)
+        click("닫기")
         click("오디오 출력")
         await("USB default and advanced official choices") { visible("USB 오디오 · 기본") && visible("공식 비트퍼펙트 · 고급") }
         click("공식 비트퍼펙트 · 고급")
@@ -70,7 +77,9 @@ class UsbModeInstrumentedTest {
         click("USB 오디오 · 기본")
         await("return to USB mode") { PipelineStore.state.value.outputMode == OutputMode.USB }
         assertNull(PipelineStore.state.value.selectedRouteId)
-        click("음악 앱")
+        instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_BACK").use {
+            ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
+        }
         await("return to music") { visible("음악을 시작하세요") }
     }
 

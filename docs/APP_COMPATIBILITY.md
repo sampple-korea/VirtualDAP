@@ -3,6 +3,11 @@
 Catalog membership is a target, not a compatibility certification. No subscription login, account
 state, DRM verdict or provider policy is bypassed. Tests use an ordinary application UID.
 
+**Scope update, September 17, 2026:** the user excluded further commercial-app login and
+in-app playback checks from completion. The historical failures below remain disclosed;
+they are not newly passing results. Completion now concerns code regression, interface/usability,
+relevant feature review and release delivery. No further account-entry tests are required.
+
 ## User-reported compatibility gap after alpha 2
 
 The user reports Apple Music opening but login and other operations loading indefinitely, and
