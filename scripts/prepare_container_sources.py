@@ -372,6 +372,17 @@ def prepare(upstream, dobby, overrides, output):
 
     activity_thread = package / "app/BActivityThread.java"
     content = activity_thread.read_text(encoding="utf-8")
+    service_loader = "        ClassLoader classLoader = BRLoadedApk.get(mBoundApplication.info).getClassLoader();"
+    if content.count(service_loader) != 2:
+        raise ValueError("Expected the service and job-service application loaders")
+    # Android may redeliver a proxy bind/job after the imported package was removed. In that
+    # case bindApplication returns without AppBindData; never dereference the missing state.
+    # Recorded initialization exceptions still propagate from isInit/bindApplication above.
+    content = content.replace(service_loader,
+        '        if (mBoundApplication == null) {\n'
+        '            Slog.w(TAG, "Service application is no longer available: " + serviceInfo.packageName);\n'
+        '            return null;\n'
+        '        }\n' + service_loader)
     content = replace_once(content, "    public boolean isInit() {\n        return mBoundApplication != null;",
         "    private final top.niunaijun.blackbox.utils.compat.InitializationFailure initializationFailure =\n"
         "            new top.niunaijun.blackbox.utils.compat.InitializationFailure();\n\n"
@@ -445,6 +456,18 @@ def prepare(upstream, dobby, overrides, output):
         "            } else if (BRActivityThread.get(BlackBoxCore.mainThread())._check_performNewIntents(null, null) != null) {",
     )
     activity_thread.write_text(content, encoding="utf-8")
+
+    service_dispatcher = package / "app/dispatcher/AppServiceDispatcher.java"
+    content = service_dispatcher.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "        IBinder token = proxyServiceRecord.mToken;\n",
+        "        IBinder token = proxyServiceRecord.mToken;\n\n"
+        "        // Stale Android rebind after uninstall must not initialize an absent app.\n"
+        "        if (serviceInfo == null || !BlackBoxCore.get().isInstalled(\n"
+        "                serviceInfo.packageName, proxyServiceRecord.mUserId)) {\n"
+        "            return null;\n"
+        "        }\n")
+    service_dispatcher.write_text(content, encoding="utf-8")
 
     activity_proxy = package / "fake/service/IActivityManagerProxy.java"
     content = activity_proxy.read_text(encoding="utf-8")

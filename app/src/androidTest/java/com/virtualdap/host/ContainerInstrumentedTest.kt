@@ -381,6 +381,23 @@ class ContainerInstrumentedTest {
             assertEquals(null, ContainerRuntime.state.value.lastError)
             assertEquals(otherPackages, ContainerRuntime.state.value.applications.map { it.packageName }.toSet())
             assertEquals(false, top.niunaijun.blackbox.BlackBoxCore.get().isInstalled(FIXTURE, 0))
+            // Android can rebind an old proxy after uninstall. It must return a null binding,
+            // without trying to build an Application for the now-absent package or crashing.
+            val staleService = android.content.pm.ServiceInfo().apply {
+                packageName = FIXTURE
+                name = "$FIXTURE.FixtureMediaService"
+                processName = FIXTURE
+            }
+            val stale = android.content.Intent()
+            top.niunaijun.blackbox.proxy.record.ProxyServiceRecord.saveStub(
+                stale, android.content.Intent().setClassName(FIXTURE, staleService.name),
+                staleService, android.os.Binder(), 0, 1,
+            )
+            instrumentation.runOnMainSync {
+                val dispatcher = top.niunaijun.blackbox.app.dispatcher.AppServiceDispatcher.get()
+                assertEquals(null, dispatcher.onBind(stale))
+                assertEquals(android.app.Service.START_NOT_STICKY, dispatcher.onStartCommand(stale, 0, 1))
+            }
         } finally {
             capture.close()
             fixture.delete()

@@ -51,6 +51,21 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_removed_service_rebind_cannot_dereference_missing_application(self):
+        dispatcher = (JAVA / "app/dispatcher/AppServiceDispatcher.java").read_text()
+        begin = dispatcher.index("    private Service getOrCreateService")
+        dispatch = dispatcher[begin:]
+        self.assertIn("serviceInfo.packageName, proxyServiceRecord.mUserId", dispatch)
+        self.assertLess(dispatch.index("!BlackBoxCore.get().isInstalled"), dispatch.index("findRecord(intent)"))
+        activity = (JAVA / "app/BActivityThread.java").read_text()
+        for start, end in (("    public Service createService", "    public JobService createJobService"),
+                           ("    public JobService createJobService", "    public void bindApplication")):
+            begin = activity.index(start)
+            body = activity[begin:activity.index(end, begin)]
+            self.assertLess(body.index("if (mBoundApplication == null)"),
+                            body.index("BRLoadedApk.get(mBoundApplication.info)"))
+            self.assertIn("return null;", body)
+
     def test_application_failure_is_not_a_fake_success_or_stranded_binder_wait(self):
         activity = (JAVA / "app/BActivityThread.java").read_text()
         begin = activity.index("    public void bindApplication(final String packageName")
