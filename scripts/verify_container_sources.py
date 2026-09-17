@@ -51,6 +51,18 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_external_service_binding_keeps_real_renderer_and_dispatcher(self):
+        activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
+        begin = activity.index("    public static Object BindServiceCommon")
+        binding = activity[begin:activity.index('    @ProxyMethod("unbindService")', begin)]
+        self.assertIn("BlackBoxCore.get().isInstalled(resolved.serviceInfo.packageName, userId)", binding)
+        self.assertIn("new Intent((Intent) args[2])", binding)
+        self.assertIn("ServiceBindingArguments.prepare", binding)
+        self.assertNotIn("_set_mConnection", binding)
+        self.assertNotIn("args[6] = null", binding)
+        self.assertEqual(1, binding.count("method.invoke(who, forwarded)"))
+        self.assertIn("throw error.getCause()", binding)
+
     def test_removed_service_rebind_cannot_dereference_missing_application(self):
         dispatcher = (JAVA / "app/dispatcher/AppServiceDispatcher.java").read_text()
         begin = dispatcher.index("    private Service getOrCreateService")

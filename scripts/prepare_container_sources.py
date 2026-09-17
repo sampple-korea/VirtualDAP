@@ -170,6 +170,63 @@ def prepare(upstream, dobby, overrides, output):
 
     activity_manager = package / "fake/service/IActivityManagerProxy.java"
     content = activity_manager.read_text(encoding="utf-8")
+    begin = content.index("    public static Object BindServiceCommon")
+    end = content.index('    @ProxyMethod("unbindService")', begin)
+    content = content[:begin] + '''    public static Object BindServiceCommon(Object who, Method method, Object[] args) throws Throwable {
+        int caller = top.niunaijun.blackbox.utils.compat.ServiceBindingArguments.callerIndex(method.getName(), args);
+        Object[] forwarded = args;
+        if (caller >= 0 && args[2] instanceof Intent) {
+            Intent intent = new Intent((Intent) args[2]);
+            String resolvedType = (String) args[3];
+            IServiceConnection connection = (IServiceConnection) args[4];
+            int userId = intent.getIntExtra("_B_|_UserId", BActivityThread.getUserId());
+            ResolveInfo resolved = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
+            // Open system packages (WebView/browser) keep the real Android service, callback
+            // dispatcher, isolated instance and flags. Never wrap them as guest proxy services.
+            boolean imported = resolved != null && resolved.serviceInfo != null &&
+                    BlackBoxCore.get().isInstalled(resolved.serviceInfo.packageName, userId);
+            forwarded = top.niunaijun.blackbox.utils.compat.ServiceBindingArguments.prepare(
+                    method.getName(), args, imported, BActivityThread.getAppPackageName(), BlackBoxCore.getHostPkg());
+            if (imported) {
+                if (intent.getComponent() == null) intent.setComponent(new ComponentName(
+                        resolved.serviceInfo.packageName, resolved.serviceInfo.name));
+                Intent proxyIntent = BlackBoxCore.getBActivityManager().bindService(intent,
+                        connection == null ? null : connection.asBinder(), resolvedType, userId);
+                if (proxyIntent == null || proxyIntent.getComponent() == null ||
+                        !BlackBoxCore.getHostPkg().equals(proxyIntent.getComponent().getPackageName())) {
+                    throw new IllegalStateException("Container service did not resolve to a host stub");
+                }
+                forwarded[2] = proxyIntent;
+                if (connection != null) forwarded[4] = ServiceConnectionDelegate.createProxy(connection, intent);
+                // Do not replace LoadedApk.ServiceDispatcher.mConnection: it is the app's
+                // ServiceConnection, not IServiceConnection. The original dispatcher owns threading.
+            }
+        }
+        try {
+            return method.invoke(who, forwarded);
+        } catch (java.lang.reflect.InvocationTargetException error) {
+            // Never repeat a bind on failure or turn a remote denial into a second side effect.
+            throw error.getCause();
+        }
+    }
+
+    @ProxyMethod("bindService")
+    public static class BindService extends MethodHook {
+        @Override protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return BindServiceCommon(who, method, args);
+        }
+        @Override protected boolean isEnable() {
+            return BlackBoxCore.get().isBlackProcess() || BlackBoxCore.get().isServerProcess();
+        }
+    }
+
+    @ProxyMethod("bindServiceInstance")
+    public static class BindServiceInstance extends BindService {}
+
+    @ProxyMethod("bindIsolatedService")
+    public static class BindIsolatedService extends BindService {}
+
+''' + content[end:]
     begin = content.index('    @ProxyMethod("broadcastIntent")')
     end = content.index('    @ProxyMethod("unregisterReceiver")', begin)
     content = content[:begin] + '''    @ProxyMethod("broadcastIntent")

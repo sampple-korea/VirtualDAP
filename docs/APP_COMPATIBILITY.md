@@ -3,10 +3,15 @@
 Catalog membership is a target, not a compatibility certification. No subscription login, account
 state, DRM verdict or provider policy is bypassed. Tests use an ordinary application UID.
 
-**Scope update, September 17, 2026:** the user excluded further commercial-app login and
-in-app playback checks from completion. The historical failures below remain disclosed;
-they are not newly passing results. Completion now concerns code regression, interface/usability,
-relevant feature review and release delivery. No further account-entry tests are required.
+**Latest scope update, September 17, 2026, after alpha 5:** the user requires reaching Apple
+Music's credential-entry screen and Google account addition from YouTube Music. No credentials
+need to be submitted; successful authentication/subscription playback are still not required.
+The previous quality-only completion does not satisfy this new acceptance criterion. A welcome
+screen, account picker, app process surviving, or a green fixture suite is not login-screen proof.
+
+The original reference APK's temporary upload path is no longer present. Its retained local
+interoperability-analysis files remain available; they are not part of the tracked project.
+New findings and actual screen outcomes will be recorded separately from earlier alpha evidence.
 
 ## User-reported compatibility gap after alpha 2
 
