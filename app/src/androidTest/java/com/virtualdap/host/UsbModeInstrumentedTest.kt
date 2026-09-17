@@ -67,7 +67,13 @@ class UsbModeInstrumentedTest {
         await("missing output has an actionable explanation inside the tool") {
             visible("오디오 출력에서 장치를 먼저 선택해 주세요.") && visible("아직 실행하지 않았습니다.")
         }
-        assertFalse(requireNotNull(findText("소리 테스트 시작")).isEnabled)
+        // Compose exposes Text and its Button as separate accessibility nodes. Disabled
+        // belongs to the actionable ancestor, not necessarily to the label's text node.
+        val testButton = requireNotNull(actionNode("소리 테스트 시작"))
+        assertFalse(testButton.isEnabled)
+        testButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        instrumentation.waitForIdleSync()
+        assertEquals(com.virtualdap.host.model.OutputTestPhase.IDLE, PipelineStore.state.value.outputTestPhase)
         click("닫기")
         click("오디오 출력")
         await("USB default and advanced official choices") { visible("USB 오디오 · 기본") && visible("공식 비트퍼펙트 · 고급") }
@@ -98,10 +104,14 @@ class UsbModeInstrumentedTest {
     }
     private fun visible(text: String): Boolean = findText(text) != null
 
-    private fun click(text: String) = await("click $text") {
+    private fun actionNode(text: String): AccessibilityNodeInfo? {
         var node = findText(text)
         while (node != null && !node.isClickable) node = node.parent
-        node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        return node
+    }
+
+    private fun click(text: String) = await("click $text") {
+        actionNode(text)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
     }
 
     private fun await(operation: String, condition: () -> Boolean) {
