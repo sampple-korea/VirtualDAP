@@ -209,6 +209,32 @@ public final class MusicFixtureActivity extends Activity {
         } catch (RuntimeException failure) {
             controllerStatus.setText("MEDIA CONTROLLER ERROR: " + failure);
         }
+        TextView userStatus = new TextView(this);
+        content.addView(userStatus);
+        try {
+            android.os.UserManager users = getSystemService(android.os.UserManager.class);
+            java.lang.reflect.Method lookup = android.os.UserManager.class.getMethod("getUserInfo", int.class);
+            Object current = lookup.invoke(users, 0);
+            if (current == null || current.getClass().getField("id").getInt(current) != 0
+                    || !(Boolean) current.getClass().getMethod("isMain").invoke(current)
+                    || (Boolean) current.getClass().getMethod("isAdmin").invoke(current)
+                    || lookup.invoke(users, Integer.MAX_VALUE) != null
+                    || users.getUserProfiles().size() != 1) {
+                throw new IllegalStateException("Wrong active-space user metadata or cross-user disclosure");
+            }
+            if (users.getClass().getMethod("getProfileParent", int.class).invoke(users, 0) != null) {
+                throw new IllegalStateException("Full music space has an invented profile parent");
+            }
+            for (String permission : new String[]{"android.permission.MANAGE_USERS",
+                    "android.permission.CREATE_USERS", "android.permission.QUERY_USERS"}) {
+                if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    throw new IllegalStateException("System user-management permission changed");
+                }
+            }
+            userStatus.setText("PRIVATE USER READY: active space / no system privileges");
+        } catch (Exception failure) {
+            userStatus.setText("PRIVATE USER ERROR: " + failure);
+        }
         TextView serviceQuery = new TextView(this);
         try {
             android.content.Intent query = new android.content.Intent("android.media.browse.MediaBrowserService")

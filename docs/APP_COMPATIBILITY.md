@@ -631,6 +631,18 @@ fixture tests passed (64.621 seconds). Android's normal package compiler was run
 on the test host before this fixture run; this is a test-environment optimization, not a product
 prerequisite, a timeout override or proof that the real-app continuation is fixed.
 
+The next ordinary Google Add account attempt started the UI process and reached the real
+`AccountIntroActivity`. It then crashed in `UserManager.isMainUser()` because `getUserInfo`
+escaped to the device user service and required QUERY_USERS/CREATE_USERS/MANAGE_USERS.
+The container now maps read-only user/profile queries to its persisted active-space record.
+Unknown or other-space IDs return absence; full music spaces have no invented profile parent.
+The returned full-user metadata does not mark the app as an Android administrator/system user,
+grant permissions, create OS users or expose device profiles. Missing internal service remains
+an error rather than a fabricated user. The ordinary-UID fixture verifies the main-space record,
+absent-user lookup, one local profile, no profile parent and denied OS user-management permissions.
+Debug/test builds, 153 JVM tests, 35 prepared-source checks and both API 36 fixture tests passed
+(70.252 seconds). Actual Google credential-form verification remains pending for this change.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares

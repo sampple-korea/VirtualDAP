@@ -51,6 +51,18 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_user_metadata_is_limited_to_the_real_active_container_record(self):
+        proxy = (JAVA / "fake/service/IUserManagerProxy.java").read_text()
+        self.assertIn("requested != active", proxy)
+        self.assertIn("users.getUserInfo(active)", proxy)
+        self.assertIn("user.id == active", proxy)
+        self.assertIn("user.status == BUserStatus.ENABLE", proxy)
+        self.assertIn('@ProxyMethod("getUserInfo")', proxy)
+        self.assertIn('@ProxyMethod("getProfiles")', proxy)
+        self.assertNotIn("method.invoke(who", proxy)
+        self.assertNotIn("createUser(", proxy)
+        self.assertNotIn("FLAG_PRIMARY()", proxy)
+
     def test_external_service_binding_keeps_real_renderer_and_dispatcher(self):
         activity = (JAVA / "fake/service/IActivityManagerProxy.java").read_text()
         begin = activity.index("    public static Object BindServiceCommon")

@@ -213,6 +213,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("PRIVATE BROADCAST READY: music space only")?.isNotEmpty() == true
             }
+            await("active-space user metadata without host user-management permissions") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                val failure = root?.findAccessibilityNodeInfosByText("PRIVATE USER ERROR:")?.firstOrNull()?.text
+                if (failure != null) org.junit.Assert.fail(failure.toString())
+                root?.findAccessibilityNodeInfosByText("PRIVATE USER READY:")?.isNotEmpty() == true
+            }
             await("declared media service and real private authenticator response without system permission") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")
