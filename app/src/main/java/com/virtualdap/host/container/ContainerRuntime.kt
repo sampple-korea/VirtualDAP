@@ -90,7 +90,7 @@ object ContainerRuntime {
     private var controlBound = false
     private val controlConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            initializeControl()
+            if (BlackBoxCore.get().isMainProcess) initializeControl()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -165,6 +165,9 @@ object ContainerRuntime {
         if (!attached) return true
         val core = BlackBoxCore.get()
         if (!core.isMainProcess) {
+            // Each client owns its dependency. A cached host UI cannot keep the control
+            // process alive on behalf of a foreground imported activity.
+            if (core.isBlackProcess) bindControl()
             core.doCreate()
             return false
         }
@@ -194,7 +197,7 @@ object ContainerRuntime {
             detail = "Connecting to the music space", lastError = null) }
         try {
             controlBound = context.bindService(
-                Intent(context, ContainerControlService::class.java),
+                Intent().setComponent(ComponentName(BlackBoxCore.getHostPkg(), ContainerControlService::class.java.name)),
                 controlConnection, Context.BIND_AUTO_CREATE,
             )
             check(controlBound) { "Android did not bind the control service" }

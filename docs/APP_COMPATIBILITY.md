@@ -581,6 +581,35 @@ the excluded adapters. This does not establish working Google services, login or
 
 ## Container control lifetime
 
+September 18 continuation: a real YouTube Music Add account attempt exposed a different lifetime
+gap. Its host UI was cached while the imported activity was foreground. Android repeatedly killed
+the control process with `Sync transaction while frozen`; the imported main thread waited in
+`ActivityThread.acquireProvider` via `BJobManager.queryJobRecord`, producing an input ANR.
+Every imported client now holds its own ordinary, explicit host control-service binding. Host
+services bypass imported-service resolution to avoid recursively contacting the same control
+process during connection/recovery. A later real-app attempt retained the control process at
+foreground-bound importance and did not reproduce the ANR; this does not prove credential-form
+compatibility or survive every lifecycle transition.
+
+The private account transport delegates to the imported `AbstractAccountAuthenticator` public
+implementation, preserving the real response binder, asynchronous results and standard errors.
+Only an exact declared authenticator in the active imported package/user is eligible. A bounded,
+identity-tracked local Binder walk handles modular forwarding layers; remote, ambiguous and
+oversized graphs are left unchanged. Android ACCOUNT_MANAGER permission remains denied; no
+host accounts, credentials, token fabrication or platform-permission changes are involved.
+The fixture checks two forwarding layers with a cycle, a real immediate response, an asynchronous
+response and a sanitized failure, as well as the existing PCM capture and split-update checks.
+The local API 36 fixture passed both tests after correcting its expected exception type from
+IOException to AuthenticatorException. Debug build and 148 JVM tests passed; the preceding
+direct-transport/lifetime build also passed lint. The newer forwarding-layer change still requires
+the complete runtime/lint gate before release.
+
+Actual-app status remains incomplete: before the forwarding-layer change, Google Add account
+still reached Android's protected Transport through its modular Binder wrappers. Apple Music
+opened Home, Settings and Sign In with a real external WebView renderer, but HTML bootstrap
+timed out in `LoadingHTML` after 30 seconds. No credential-entry form, completed login or
+subscription playback is claimed from these observations.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares

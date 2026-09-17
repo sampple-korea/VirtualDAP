@@ -180,7 +180,12 @@ def prepare(upstream, dobby, overrides, output):
             String resolvedType = (String) args[3];
             IServiceConnection connection = (IServiceConnection) args[4];
             int userId = intent.getIntExtra("_B_|_UserId", BActivityThread.getUserId());
-            ResolveInfo resolved = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
+            // Host lifetime/proxy services must not resolve through the server they are
+            // connecting to. That recursive dependency can stall client startup/recovery.
+            boolean hostService = intent.getComponent() != null &&
+                    BlackBoxCore.getHostPkg().equals(intent.getComponent().getPackageName());
+            ResolveInfo resolved = hostService ? null :
+                    BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
             // Open system packages (WebView/browser) keep the real Android service, callback
             // dispatcher, isolated instance and flags. Never wrap them as guest proxy services.
             boolean imported = resolved != null && resolved.serviceInfo != null &&
@@ -516,6 +521,9 @@ def prepare(upstream, dobby, overrides, output):
 
     service_dispatcher = package / "app/dispatcher/AppServiceDispatcher.java"
     content = service_dispatcher.read_text(encoding="utf-8")
+    content = replace_once(content, "            IBinder iBinder = service.onBind(intent);",
+        "            IBinder iBinder = top.niunaijun.blackbox.core.LocalAuthenticatorTransport.wrap(\n"
+        "                    service.onBind(intent), intent, serviceInfo, serviceRecord.mUserId);")
     content = replace_once(content,
         "        IBinder token = proxyServiceRecord.mToken;\n",
         "        IBinder token = proxyServiceRecord.mToken;\n\n"

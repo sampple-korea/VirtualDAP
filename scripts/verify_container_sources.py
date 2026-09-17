@@ -57,6 +57,8 @@ class PreparedContainerTests(unittest.TestCase):
         binding = activity[begin:activity.index('    @ProxyMethod("unbindService")', begin)]
         self.assertIn("BlackBoxCore.get().isInstalled(resolved.serviceInfo.packageName, userId)", binding)
         self.assertIn("new Intent((Intent) args[2])", binding)
+        self.assertIn("ResolveInfo resolved = hostService ? null :", binding)
+        self.assertIn("BlackBoxCore.getHostPkg().equals(intent.getComponent().getPackageName())", binding)
         self.assertIn("ServiceBindingArguments.prepare", binding)
         self.assertNotIn("_set_mConnection", binding)
         self.assertNotIn("args[6] = null", binding)
@@ -221,6 +223,27 @@ class PreparedContainerTests(unittest.TestCase):
         block = block.split("if (permission.equals(Manifest.permission.SEND_SMS))", 1)[0]
         self.assertIn("return method.invoke(who, args)", block)
         self.assertNotIn("PERMISSION_GRANTED", block)
+
+    def test_private_authenticator_adapter_does_not_replace_system_permissions(self):
+        adapter = (JAVA / "core/LocalAuthenticatorTransport.java").read_text()
+        self.assertIn("Binder.getCallingUid() != BlackBoxCore.getHostUid()", adapter)
+        self.assertIn("userId != BActivityThread.getUserId()", adapter)
+        self.assertIn("owner.getIBinder() != current", adapter)
+        self.assertIn("if (!(root instanceof Binder)) return null", adapter)
+        self.assertIn("seen.size() > 32", adapter)
+        self.assertIn("found != null && found != owner", adapter)
+        self.assertIn("AccountAuthenticatorResponse.CREATOR.createFromParcel(parcel)", adapter)
+        self.assertIn("target.addAccount(callback", adapter)
+        self.assertIn("if (result != null) response.onResult(result)", adapter)
+        for forbidden in ("PERMISSION_GRANTED", "setCallingUid", "getAccountsByType", "getPassword", "setAuthToken"):
+            self.assertNotIn(forbidden, adapter)
+
+    def test_each_music_client_declares_its_control_process_dependency(self):
+        runtime = (APP_JAVA / "container/ContainerRuntime.kt").read_text()
+        self.assertIn("if (core.isBlackProcess) bindControl()", runtime)
+        self.assertIn("if (BlackBoxCore.get().isMainProcess) initializeControl()", runtime)
+        self.assertIn("ComponentName(BlackBoxCore.getHostPkg(), ContainerControlService::class.java.name)", runtime)
+        self.assertIn("controlConnection, Context.BIND_AUTO_CREATE", runtime)
 
     def test_current_android_new_intents_use_activity_record(self):
         thread = (JAVA / "app/BActivityThread.java").read_text()

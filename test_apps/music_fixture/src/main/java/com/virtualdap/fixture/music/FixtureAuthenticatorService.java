@@ -23,7 +23,20 @@ public final class FixtureAuthenticatorService extends Service {
                 return result;
             }
             @Override public Bundle addAccount(AccountAuthenticatorResponse r, String t, String token,
-                    String[] features, Bundle options) { return unsupported(); }
+                    String[] features, Bundle options) {
+                if ("fixture.async".equals(token)) {
+                    new android.os.Handler(getMainLooper()).post(() -> {
+                        Bundle result = new Bundle();
+                        result.putBoolean("virtualdap.fixture.authenticator.async", true);
+                        r.onResult(result);
+                    });
+                    return null;
+                }
+                if ("fixture.error".equals(token)) {
+                    throw new IllegalStateException("fixture-sensitive-error-must-not-escape");
+                }
+                return unsupported();
+            }
             @Override public Bundle confirmCredentials(AccountAuthenticatorResponse r, Account a, Bundle b) { return unsupported(); }
             @Override public Bundle getAuthToken(AccountAuthenticatorResponse r, Account a, String t, Bundle b) { return unsupported(); }
             @Override public String getAuthTokenLabel(String type) { return null; }
@@ -41,6 +54,17 @@ public final class FixtureAuthenticatorService extends Service {
 
     @Override public IBinder onBind(Intent intent) {
         return AccountManager.ACTION_AUTHENTICATOR_INTENT.equals(intent.getAction())
-                ? authenticator.getIBinder() : null;
+                ? new ForwardingBinder(new ForwardingBinder(authenticator.getIBinder())) : null;
+    }
+
+    /** Exercise modular services' local Binder forwarding without credentials or tokens. */
+    private static final class ForwardingBinder extends android.os.Binder {
+        private final IBinder delegate;
+        private final android.os.Binder cycle = this;
+        ForwardingBinder(IBinder delegate) { this.delegate = delegate; }
+        @Override protected boolean onTransact(int code, android.os.Parcel data,
+                android.os.Parcel reply, int flags) throws android.os.RemoteException {
+            return delegate.transact(code, data, reply, flags);
+        }
     }
 }

@@ -213,12 +213,12 @@ class ContainerInstrumentedTest {
                 if (failure != null) org.junit.Assert.fail(failure.toString())
                 root?.findAccessibilityNodeInfosByText("PRIVATE BROADCAST READY: music space only")?.isNotEmpty() == true
             }
-            await("declared media service and bounded failure of an unauthorized authenticator session") {
+            await("declared media service and real private authenticator response without system permission") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 val failure = root?.findAccessibilityNodeInfosByText("MEDIA SERVICE QUERY ERROR:")
                     ?.firstOrNull()?.text
                 if (failure != null) org.junit.Assert.fail(failure.toString())
-                root?.findAccessibilityNodeInfosByText("AUTHENTICATOR TIMEOUT REPORTED")?.isNotEmpty() == true
+                root?.findAccessibilityNodeInfosByText("ASYNC AND ERROR READY")?.isNotEmpty() == true
             }
             click("Check unsupported output rejection")
             await("ordinary-UID MediaRouter2 discovery") {

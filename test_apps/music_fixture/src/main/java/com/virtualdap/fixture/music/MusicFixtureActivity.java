@@ -241,17 +241,16 @@ public final class MusicFixtureActivity extends Activity {
                     + authenticatorMatches);
             }
             serviceQuery.setText("MEDIA SERVICE QUERY READY / AUTHENTICATOR DISCOVERY READY");
-            final long authStart = android.os.SystemClock.elapsedRealtime();
             android.accounts.AccountManager.get(this).editProperties(
                 "com.virtualdap.fixture.discovery", null, future -> {
                     try {
-                        future.getResult();
-                        serviceQuery.setText("MEDIA SERVICE QUERY ERROR: privileged authenticator unexpectedly accepted");
-                    } catch (android.accounts.AuthenticatorException expected) {
-                        long elapsed = android.os.SystemClock.elapsedRealtime() - authStart;
-                        serviceQuery.setText("timeout".equals(expected.getMessage()) && elapsed >= 25_000 && elapsed < 60_000
-                            ? "MEDIA SERVICE QUERY READY / AUTHENTICATOR TIMEOUT REPORTED"
-                            : "MEDIA SERVICE QUERY ERROR: unexpected authenticator deadline " + elapsed);
+                        android.os.Bundle result = future.getResult();
+                        if (!result.getBoolean("virtualdap.fixture.authenticator.reached") ||
+                                checkSelfPermission(android.Manifest.permission.ACCOUNT_MANAGER)
+                                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            throw new IllegalStateException("Private authenticator result missing or OS permission changed");
+                        }
+                        checkAsyncAuthenticator(serviceQuery);
                     } catch (Exception failure) {
                         serviceQuery.setText("MEDIA SERVICE QUERY ERROR: " + failure);
                     }
@@ -349,6 +348,34 @@ public final class MusicFixtureActivity extends Activity {
         if ("com.virtualdap.fixture.NEW_INTENT".equals(intent.getAction())) {
             newIntentStatus.setText("NEW INTENT: " + intent.getStringExtra("request"));
         }
+    }
+
+    private void checkAsyncAuthenticator(TextView statusView) {
+        android.accounts.AccountManager manager = android.accounts.AccountManager.get(this);
+        android.os.Handler handler = new android.os.Handler(getMainLooper());
+        manager.addAccount("com.virtualdap.fixture.discovery", "fixture.async", null, null, null, future -> {
+            try {
+                if (!future.getResult().getBoolean("virtualdap.fixture.authenticator.async")) {
+                    throw new IllegalStateException("Deferred authenticator callback missing");
+                }
+                manager.addAccount("com.virtualdap.fixture.discovery", "fixture.error", null, null, null, failed -> {
+                    try {
+                        failed.getResult();
+                        statusView.setText("MEDIA SERVICE QUERY ERROR: failed authenticator reported success");
+                    } catch (android.accounts.AuthenticatorException expected) {
+                        if (String.valueOf(expected.getMessage()).contains("fixture-sensitive-error")) {
+                            statusView.setText("MEDIA SERVICE QUERY ERROR: authenticator exception leaked");
+                        } else {
+                            statusView.setText("MEDIA SERVICE QUERY READY / PRIVATE AUTHENTICATOR READY / ASYNC AND ERROR READY");
+                        }
+                    } catch (Exception failure) {
+                        statusView.setText("MEDIA SERVICE QUERY ERROR: " + failure);
+                    }
+                }, handler);
+            } catch (Exception failure) {
+                statusView.setText("MEDIA SERVICE QUERY ERROR: " + failure);
+            }
+        }, handler);
     }
 
     private void checkUnsupportedOutput() {
