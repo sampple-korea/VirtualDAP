@@ -49,7 +49,11 @@ class UsbModeInstrumentedTest {
         instrumentation.uiAutomation.executeShellCommand("am start -W -n com.virtualdap.host/.MainActivity").use {
             ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
         }
-        await("Korean music home") { visible("음악을 시작하세요") }
+        await("Korean music home") { visible("내 음악 공간") && visible("출력 연결 전") }
+        assertTrue(visible("앱은 지금 열고, 출력은 나중에 연결하세요"))
+        click("음악 앱 추가")
+        await("single add destination for files and installed apps") { visible("APK / APKS 파일 선택") && visible("휴대폰에서 가져오기") }
+        click("닫기")
         assertEquals(OutputMode.USB, PipelineStore.state.value.outputMode)
         assertFalse(visible("로컬 DSD 파일"))
         click("도구")
@@ -60,7 +64,7 @@ class UsbModeInstrumentedTest {
         click("도구")
         click("로그인 환경")
         await("login dependency setup") { visible("Google 서비스 프레임워크") }
-        assertFalse(visible("앱 열기"))
+        assertFalse(visible("내 음악 공간"))
         click("닫기")
         click("도구")
         click("출력 소리 테스트")
@@ -86,7 +90,7 @@ class UsbModeInstrumentedTest {
         instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_BACK").use {
             ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
         }
-        await("return to music") { visible("음악을 시작하세요") }
+        await("return to music") { visible("내 음악 공간") }
     }
 
     private fun findText(text: String): AccessibilityNodeInfo? {
@@ -97,7 +101,7 @@ class UsbModeInstrumentedTest {
         // necessarily implement findAccessibilityNodeInfosByText for those descendants.
         while (pending.isNotEmpty() && examined++ < 2000) {
             val node = pending.removeFirst()
-            if (node.text?.toString() == text && node.isVisibleToUser) return node
+            if ((node.text?.toString() == text || node.contentDescription?.toString() == text) && node.isVisibleToUser) return node
             repeat(node.childCount) { node.getChild(it)?.let(pending::add) }
         }
         return null

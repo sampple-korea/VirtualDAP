@@ -51,6 +51,7 @@ import com.virtualdap.host.service.OutputSupportPresentation
 import com.virtualdap.host.service.PipelineStore
 import com.virtualdap.host.ui.theme.VirtualDAPTheme
 import com.virtualdap.host.ui.MusicInteraction
+import com.virtualdap.host.ui.MusicScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -134,6 +135,11 @@ private fun VirtualDAPApp() {
         pendingPackage = null
     }
     fun start(action: String, packageName: String? = null) {
+        // Setup-only launches need neither USB nor a foreground audio service/notification.
+        if (packageName != null && !MusicInteraction.shouldStartOutput(PipelineStore.state.value)) {
+            ContainerRuntime.launch(packageName)
+            return
+        }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             pendingAction = action
             pendingPackage = packageName
@@ -156,7 +162,7 @@ private fun VirtualDAPApp() {
             }
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
                 NavigationBarItem(selected = !outputTab, onClick = { outputTab = false },
                     icon = { Icon(Icons.Rounded.LibraryMusic, null) }, label = { Text("음악 앱") })
                 NavigationBarItem(selected = outputTab, onClick = { outputTab = true },
@@ -165,7 +171,7 @@ private fun VirtualDAPApp() {
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
-            if (outputTab) OutputScreen(audio, usb)
+            if (outputTab) OutputScreen(audio, usb, onStart = { start(AudioPipelineService.ACTION_START) })
             else MusicScreen(apps, audio, onImport = {
                 import.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream"))
             }, onLaunch = { start(AudioPipelineService.ACTION_START, it) }, onOutput = { outputTab = true })
@@ -287,132 +293,16 @@ private fun VirtualDAPApp() {
     }
 }
 
-@Composable
-private fun MusicScreen(apps: ContainerSnapshot, audio: PipelineSnapshot, onImport: () -> Unit,
-    onLaunch: (String) -> Unit, onOutput: () -> Unit) {
-    var showHostApps by rememberSaveable { mutableStateOf(false) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var removePackage by rememberSaveable { mutableStateOf<String?>(null) }
-    val ready = apps.phase == ContainerPhase.READY
-    val filteredApps = apps.musicApplications.filter { MusicInteraction.matches(it, query) }
-    apps.musicApplications.firstOrNull { it.packageName == removePackage }?.let { app ->
-        AlertDialog(onDismissRequest = { removePackage = null }, title = { Text("${app.name} 삭제") },
-            text = { Text("음악 공간 안의 이 앱과 로그인 정보·다운로드 등 앱 데이터가 삭제됩니다. 되돌릴 수 없습니다. 휴대폰에 원래 설치한 앱과 데이터는 유지됩니다.") },
-            confirmButton = { TextButton(enabled = ready, onClick = {
-                ContainerRuntime.remove(app.packageName)
-                removePackage = null
-            }) { Text("음악 공간에서 삭제") } },
-            dismissButton = { TextButton(onClick = { removePackage = null }) { Text("취소") } })
-    }
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            Text("음악을 시작하세요", style = MaterialTheme.typography.headlineMedium)
-            Text("음악 앱을 추가하고 USB로 감상하세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-              Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val route = OutputRoutePolicy.selected(audio)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(route?.name ?: "출력 장치를 선택해 주세요", modifier = Modifier.weight(1f))
-                    TextButton(onClick = onOutput) { Text("출력 설정") }
-                }
-                Text(if (audio.outputMode == OutputMode.USB) "USB 모드" else "고급 · 공식 비트퍼펙트 모드",
-                    style = MaterialTheme.typography.bodySmall)
-                if (audio.guestConnected) {
-                    Text("입력 ${audio.sourceFormat?.shortLabel() ?: "확인 중"}\n출력 ${audio.sinkFormat?.shortLabel() ?: "준비 중"}")
-                    Text(if (audio.bitPerfectActive) "원본 비트 보존 조건 충족 · 실측 아님"
-                        else "비트퍼펙트 미확인 · 변환 / 볼륨 / 전송 상태를 확인하세요")
-                }
-              }
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onImport, enabled = ready) { Text("음악 앱 추가") }
-                TextButton(onClick = ContainerRuntime::refresh, enabled = apps.phase.canRefresh) {
-                    Text(if (apps.phase == ContainerPhase.ERROR) "다시 시도" else "새로고침")
-                }
-            }
-            if (!ready) Text(when (apps.phase) {
-                ContainerPhase.INSTALLING -> "음악 앱을 추가하는 중입니다…"
-                ContainerPhase.REMOVING -> "음악 공간에서 앱을 삭제하는 중입니다…"
-                ContainerPhase.ERROR -> "음악 공간을 불러오지 못했습니다. 다시 시도해 주세요."
-                else -> "음악 공간을 준비하는 중입니다…"
-            })
-            apps.lastError?.let { ErrorText(it) }
-            audio.lastError?.let { ErrorText(it) }
-        }
-        if (apps.musicApplications.isEmpty()) item {
-            Section("아직 추가한 음악 앱이 없습니다") {
-                Text("APK / APKS 파일을 선택하거나, 휴대폰에 설치된 음악 앱을 가져오세요. 기존 계정과 앱 데이터는 복사하지 않습니다.")
-            }
-        }
-        if (apps.musicApplications.isNotEmpty()) item {
-            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
-                label = { Text("추가한 음악 앱 검색") }, modifier = Modifier.fillMaxWidth(),
-                trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("지우기") } })
-        }
-        if (query.isNotBlank() && filteredApps.isEmpty()) item { Text("검색 결과가 없습니다. 앱 이름이나 패키지 이름을 확인해 주세요.") }
-        items(filteredApps, key = { it.packageName }) { app ->
-            Section(app.name) {
-                val blocked = MusicInteraction.launchBlock(apps.phase, app, audio)
-                var appMenuOpen by remember { mutableStateOf(false) }
-                Text(when {
-                    app.starting -> "앱을 여는 중입니다…"
-                    app.lastStartedPid != null -> "시작됨 · 재생 상태는 앱에서 확인"
-                    else -> "실행 준비"
-                }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (blocked != null && !app.starting) Text(blocked, style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { onLaunch(app.packageName) }, enabled = blocked == null) { Text("앱 열기") }
-                    TextButton(onClick = { ContainerRuntime.stop(app.packageName) }, enabled = ready) { Text("앱 중지") }
-                    Spacer(Modifier.weight(1f))
-                    Box {
-                        IconButton(onClick = { appMenuOpen = true }, enabled = ready) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "${app.name} 관리")
-                        }
-                        DropdownMenu(expanded = appMenuOpen, onDismissRequest = { appMenuOpen = false }) {
-                            if (apps.hostApplications.any { it.packageName == app.packageName }) {
-                                DropdownMenuItem(text = { Text("휴대폰 버전으로 업데이트") }, onClick = {
-                                    appMenuOpen = false; ContainerRuntime.importHostApp(app.packageName)
-                                })
-                            }
-                            DropdownMenuItem(text = { Text("음악 공간에서 삭제") }, onClick = {
-                                appMenuOpen = false; removePackage = app.packageName
-                            })
-                        }
-                    }
-                }
-            }
-        }
-        item { TextButton(onClick = { showHostApps = !showHostApps }) { Text("휴대폰에 설치된 음악 앱 가져오기") } }
-        if (showHostApps) {
-            if (apps.hostApplications.isEmpty()) item { Text("가져올 음악 앱을 찾지 못했습니다. 파일 추가를 이용해 주세요.") }
-            items(apps.hostApplications, key = { "host-${it.packageName}" }) { app ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(app.name, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { ContainerRuntime.importHostApp(app.packageName) }, enabled = ready) {
-                        Text(if (apps.applications.any { it.packageName == app.packageName }) "업데이트" else "가져오기")
-                    }
-                }
-            }
-        }
-        item {
-            Text("Apple Music · Spotify · YouTube Music 등 다양한 음악 앱을 지원 대상으로 개발하고 있습니다. 앱별 로그인·보호 콘텐츠·재생 호환성은 아직 모두 검증되지 않았습니다.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
 
 @Composable
-private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
+private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot, onStart: () -> Unit) {
     val context = LocalContext.current
     val locked = audio.enabled || audio.dsdPlayback.active || audio.outputTestPhase == OutputTestPhase.RUNNING
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Text("오디오 출력", style = MaterialTheme.typography.headlineLarge)
-            Text("출력 경로를 직접 선택합니다. 오류나 분리 시 스피커로 자동 전환하지 않습니다.")
+            Text("소리가 나가는 곳", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(6.dp))
+            Text("앱 설정은 연결 없이도. 감상할 때 출력 장치를 선택하세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             Section("재생 모드") {
@@ -432,17 +322,12 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
             }
         }
         if (audio.outputMode == OutputMode.USB) {
-            item {
-                Section("USB 음량 ${(audio.usbGain * 100).toInt()}%") {
-                    val bypassed = MusicInteraction.bypassesSoftwareVolume(audio)
-                    Slider(value = audio.usbGain, enabled = !bypassed, onValueChange = { gain ->
-                        PipelineStore.update { it.copy(usbGain = gain, bitPerfectActive = false) }
-                    })
-                    Text("초기 음량은 25%입니다. Android 시스템 음량과 별도로 적용됩니다. 100% 미만에서는 소프트웨어 음량 조절로 원본 비트가 변경됩니다.", style = MaterialTheme.typography.bodySmall)
-                    if (bypassed) Text("현재 DoP / 네이티브 DSD 전송에는 이 음량이 적용되지 않습니다. DAC의 하드웨어 음량을 사용하세요.", color = MaterialTheme.colorScheme.primary)
+            if (usb.devices.isEmpty()) item {
+                Section("연결된 장치가 없어요") {
+                    Text("USB DAC 또는 USB 이어폰을 연결하면 여기에 표시됩니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("① 장치 연결   ② USB 접근 허용   ③ 출력 시작", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            if (usb.devices.isEmpty()) item { Text("USB DAC 또는 USB 이어폰을 연결해 주세요.") }
             items(usb.devices, key = { "usb-${it.id}" }) { device ->
                 Section(device.name) {
                     Text(if (device.permission) "USB 접근 허용됨" else "Android USB 접근 권한이 필요합니다")
@@ -457,9 +342,25 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
                     }
                 }
             }
+            item {
+                Section("USB 음량 ${(audio.usbGain * 100).toInt()}%") {
+                    val bypassed = MusicInteraction.bypassesSoftwareVolume(audio)
+                    Slider(value = audio.usbGain, enabled = !bypassed, onValueChange = { gain ->
+                        PipelineStore.update { it.copy(usbGain = gain, bitPerfectActive = false) }
+                    })
+                    Text("초기 음량은 25%입니다. Android 시스템 음량과 별도로 적용됩니다. 100% 미만에서는 소프트웨어 음량 조절로 원본 비트가 변경됩니다.", style = MaterialTheme.typography.bodySmall)
+                    if (bypassed) Text("현재 DoP / 네이티브 DSD 전송에는 이 음량이 적용되지 않습니다. DAC의 하드웨어 음량을 사용하세요.", color = MaterialTheme.colorScheme.primary)
+                }
+            }
             usb.error?.let { message -> item { ErrorText(message) } }
         } else {
-            items(audio.availableRoutes.filter { it.directUsbDeviceId == null }, key = { it.id }) { route ->
+            val officialRoutes = audio.availableRoutes.filter { it.directUsbDeviceId == null && it.isUsb }
+            if (officialRoutes.isEmpty()) item {
+                Section("USB 출력 장치를 연결하세요") {
+                    Text("공식 비트퍼펙트 지원 여부는 휴대폰·DAC·포맷에 따라 달라요. 전체 장치 정보는 도구의 진단에서 볼 수 있어요.")
+                }
+            }
+            items(officialRoutes, key = { it.id }) { route ->
                 Section("${route.name} · ${routeKind(route)}") {
                     Text(OutputSupportPresentation.officialStatus(route))
                     Button(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_SELECT_ROUTE, route.id) },
@@ -470,6 +371,13 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
             }
         }
         item {
+            val selected = OutputRoutePolicy.selected(audio)
+            Button(onClick = onStart, enabled = MusicInteraction.shouldStartOutput(audio), modifier = Modifier.fillMaxWidth()) {
+                Text(if (audio.enabled) "출력 준비됨" else "출력 시작")
+            }
+            Text(if (selected == null) "아직 선택한 출력이 없습니다. 음악 앱은 그대로 열 수 있습니다."
+                else "${selected.name} · 자동 스피커 전환 없음", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { AudioPipelineService.command(context, AudioPipelineService.ACTION_STOP) }, enabled = locked) { Text("출력 중지") }
                 TextButton(onClick = { UsbHostController.refresh() }) { Text("장치 새로고침") }
@@ -481,7 +389,7 @@ private fun OutputScreen(audio: PipelineSnapshot, usb: UsbHostSnapshot) {
 
 @Composable
 private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             content()

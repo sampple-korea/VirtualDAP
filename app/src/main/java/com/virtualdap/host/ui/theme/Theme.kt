@@ -10,34 +10,48 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Ink = Color(0xFF090B0F)
-val Panel = Color(0xFF14171D)
-val RaisedPanel = Color(0xFF1B1F27)
-val Amber = Color(0xFFE5BF72)
-val Mint = Color(0xFF72D5B4)
-val Muted = Color(0xFF9299A6)
+val Ink = Color(0xFF0D1117)
+val Panel = Color(0xFF171D25)
+val RaisedPanel = Color(0xFF242D37)
+val Amber = Color(0xFF9FD9CE)
+val Mint = Color(0xFF9FD9CE)
+val Muted = Color(0xFFA6AFBC)
 private val Error = Color(0xFFFF6F7D)
 
 private val colors = darkColorScheme(
     primary = Amber,
     onPrimary = Ink,
-    primaryContainer = Color(0xFF40351F),
-    onPrimaryContainer = Color(0xFFFFE2A4),
+    primaryContainer = Color(0xFF19352F),
+    onPrimaryContainer = Color(0xFFD2EFE7),
     secondary = Mint,
     onSecondary = Ink,
+    secondaryContainer = Color(0xFF243B38),
+    onSecondaryContainer = Color(0xFFCAE9E3),
     background = Ink,
     onBackground = Color(0xFFF3F1EC),
     surface = Panel,
     onSurface = Color(0xFFF3F1EC),
     surfaceVariant = RaisedPanel,
+    surfaceDim = Ink,
+    surfaceBright = RaisedPanel,
+    surfaceContainerLowest = Ink,
+    surfaceContainerLow = Panel,
+    surfaceContainer = Panel,
+    surfaceContainerHigh = RaisedPanel,
+    surfaceContainerHighest = Color(0xFF2D3743),
+    surfaceTint = Color.Transparent,
     onSurfaceVariant = Muted,
     error = Error,
     errorContainer = Color(0xFF3E171D),
     onErrorContainer = Color(0xFFFFD9DD),
     outline = Color(0xFF3B404A),
+    outlineVariant = Color(0xFF303C48),
 )
 
 private val typography = Typography(
+    headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+        fontSize = 26.sp, lineHeight = 34.sp, letterSpacing = (-0.5).sp),
+    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 15.sp, lineHeight = 23.sp),
     headlineLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Bold,

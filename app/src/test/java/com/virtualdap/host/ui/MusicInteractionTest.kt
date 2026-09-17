@@ -20,18 +20,34 @@ class MusicInteractionTest {
         assertFalse(MusicInteraction.matches(app, "other"))
     }
 
-    @Test fun launchRequiresAnEligiblePresentSelectedOutput() {
+    @Test fun launchWorksWithoutSelectionAndAfterDisconnectionInBothModes() {
         assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio))
-        assertNotNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(availableRoutes = emptyList())))
-        assertNotNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(outputMode = OutputMode.OFFICIAL_BIT_PERFECT)))
+        assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, PipelineSnapshot()))
+        assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(availableRoutes = emptyList())))
+        assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(outputMode = OutputMode.OFFICIAL_BIT_PERFECT)))
     }
 
     @Test fun busyStatesExplainWhyLaunchIsDisabled() {
         assertNotNull(MusicInteraction.launchBlock(ContainerPhase.REMOVING, app, audio))
         assertNotNull(MusicInteraction.launchBlock(ContainerPhase.READY, app.copy(starting = true), audio))
-        assertNotNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(outputTestPhase = OutputTestPhase.RUNNING)))
-        assertNotNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(
+        assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(outputTestPhase = OutputTestPhase.RUNNING)))
+        assertNull(MusicInteraction.launchBlock(ContainerPhase.READY, app, audio.copy(
             dsdPlayback = DsdPlaybackSnapshot(phase = DsdPlaybackPhase.PAUSED))))
+    }
+
+    @Test fun openingWithoutOutputDoesNotStartAServiceOrRequestNotificationPermission() {
+        for (mode in OutputMode.entries) {
+            assertFalse(MusicInteraction.shouldStartOutput(PipelineSnapshot(outputMode = mode)))
+            assertFalse(MusicInteraction.shouldStartOutput(audio.copy(outputMode = mode, availableRoutes = emptyList())))
+        }
+        assertFalse(MusicInteraction.shouldStartOutput(audio.copy(outputMode = OutputMode.OFFICIAL_BIT_PERFECT)))
+    }
+
+    @Test fun onlyAnIdleSelectedOutputCanBeStartedAlongsideAppLaunch() {
+        assertTrue(MusicInteraction.shouldStartOutput(audio))
+        assertFalse(MusicInteraction.shouldStartOutput(audio.copy(enabled = true)))
+        assertFalse(MusicInteraction.shouldStartOutput(audio.copy(outputTestPhase = OutputTestPhase.RUNNING)))
+        assertFalse(MusicInteraction.shouldStartOutput(audio.copy(dsdPlayback = DsdPlaybackSnapshot(phase = DsdPlaybackPhase.PAUSED))))
     }
 
     @Test fun onlyActiveRawDsdBypassesTheUsbVolumeControl() {

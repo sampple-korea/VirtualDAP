@@ -4,6 +4,13 @@ Imports run as the normal Android application UID. Only APKs selected by the use
 the host does not request unrestricted storage or install-package privileges. Hosted app data uses
 separate directories, but the shared-UID container is **not a security sandbox**. Install trusted apps.
 
+Opening and configuring an imported app does not require a DAC, headphones, a selected output,
+or the audio foreground service. The music screen's add menu supports both installed-app copies
+and APK/APKS files. App management lives in each row's overflow menu. Audio output remains a
+separate operation: select and start an eligible device on the output screen; missing output never
+enables an ordinary-mixer or speaker fallback. After a playback attempt without output, the music
+app may need playback restarted once the output is ready.
+
 The installed-app picker queries only declared music catalog and login-dependency package names, not the complete device app
 inventory. It copies base/split APK code from the selected installed app into a bounded private ZIP
 and uses the same manifest/signature/atomic-publication path. Private app data and accounts are not

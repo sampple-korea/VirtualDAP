@@ -313,7 +313,8 @@ object ContainerRuntime {
             try {
                 if (pendingLaunches[packageName] != request) return@launch
                 check(mutableState.value.applications.any { it.packageName == packageName }) { "App is not installed in the music space" }
-                MusicOutputReadiness.await(PipelineStore.state)
+                // Opening/settings do not require a DAC. Audio interception still rejects
+                // writes without a running output bridge; it never falls back to a speaker.
                 if (pendingLaunches[packageName] != request) return@launch
                 check(BlackBoxCore.get().launchApk(packageName, USER)) { "No launchable activity was found" }
                 if (previousPid != null && hostContext?.getSystemService(android.app.ActivityManager::class.java)
@@ -328,9 +329,7 @@ object ContainerRuntime {
                 pendingLaunches.remove(packageName, request)
             } catch (error: Throwable) {
                 if (pendingLaunches.remove(packageName, request)) {
-                    val message = if (error is MusicOutputUnavailable) {
-                        error.message ?: "Music output is unavailable"
-                    } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                    val message = if (error is kotlinx.coroutines.TimeoutCancellationException) {
                         "$packageName did not finish startup. Check app/Android/CPU compatibility and Diagnostics."
                     } else "Could not launch $packageName: ${error.message}"
                     mutableState.update { it.copy(
@@ -338,7 +337,7 @@ object ContainerRuntime {
                             if (app.packageName == packageName) app.copy(starting = false) else app
                         },
                         lastError = message,
-                        detail = if (error is MusicOutputUnavailable) "Audio output not ready" else "App startup failed",
+                        detail = "App startup failed",
                     ) }
                     PipelineStore.log(message, LogLevel.ERROR)
                 }

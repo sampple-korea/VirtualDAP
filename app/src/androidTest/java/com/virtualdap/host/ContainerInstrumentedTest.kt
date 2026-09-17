@@ -145,13 +145,17 @@ class ContainerInstrumentedTest {
             assertTrue(ContainerRuntime.state.value.toString(),
                 ContainerRuntime.state.value.applications.any { it.packageName == FIXTURE })
             verifyInstalledSigning(fixture, FIXTURE)
-            // No output has been started: report the real prerequisite, not a fake app timeout.
+            // A real imported activity must open for setup with no selected DAC or bridge.
+            assertEquals(null, PipelineStore.state.value.selectedRouteId)
+            assertEquals(false, PipelineStore.state.value.enabled)
             ContainerRuntime.launch(FIXTURE)
-            await("unsupported output prerequisite") {
-                ContainerRuntime.state.value.detail == "Audio output not ready"
+            await("fixture opens for setup without USB or an audio receiver") {
+                ContainerRuntime.state.value.foregroundActivity?.packageName == FIXTURE
             }
-            assertTrue(ContainerRuntime.state.value.lastError.orEmpty().contains("USB DAC"))
-            assertEquals(null, ContainerRuntime.state.value.applications.first { it.packageName == FIXTURE }.lastStartedPid)
+            assertEquals(null, ContainerRuntime.state.value.lastError)
+            assertEquals(false, PipelineStore.state.value.enabled)
+            assertEquals(null, PipelineStore.state.value.activeRoute)
+            assertEquals(false, PipelineStore.state.value.bitPerfectActive)
             capture.start()
             ContainerRuntime.launch(FIXTURE)
             await("fixture Application.onCreate") {

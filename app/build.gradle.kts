@@ -113,8 +113,8 @@ android {
         applicationId = "com.virtualdap.host"
         minSdk = 34
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.0-alpha.4"
+        versionCode = 5
+        versionName = "0.1.0-alpha.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
