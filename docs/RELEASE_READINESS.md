@@ -4,6 +4,32 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+## No-device setup and alpha 5 — September 17, 2026
+
+The follow-up request decouples music-app opening/settings from audio readiness and redesigns
+the Korean music screen. Release commit: `e5116c93182eb6f889311c71d746db45bfae232d`.
+See [alpha 5 changes and installation](releases/0.1.0-alpha.5.md).
+
+- Version code 5, minimum API 34, `debuggable=false`, 63,987,142 bytes.
+- APK SHA-256: `17197fff8a8f583ed1d492ebdc7ea35038926cf37b064fd78f2fcdfdc80126ee`.
+- Same signing certificate as alpha 4; update installation succeeded without uninstalling or
+  clearing data. The two previously imported music apps and their icons remained visible.
+- Local debug/release build and lint passed: zero errors and nine pre-existing warnings.
+  **144 JVM tests**, **30 prepared-source checks**, **5 native tests** passed. Seven obsolete
+  DAC-required launch tests were removed; output-start policy coverage was added separately.
+- Exact-commit GitHub run **35198100204** passed host verification and **20 integration tests
+  on each API**: API 34 in 83.134 seconds, API 36 in 79.073 seconds. The fixture opens without a
+  DAC, selected route or receiver, then exercises the existing PCM capture checks.
+- The actual signed distribution APK passed **20 tests in 117.002 seconds** on the API 36
+  ordinary-UID emulator. Release certificate, four-ABI/license/retired-code boundary,
+  manifest and 16 KB ZIP alignment passed. Only the consumer APK and checksum are public.
+- Local boot was delayed by emulator system/launcher ANRs and a network-stack system restart,
+  before app testing. No data wipe, assertion weakening or product workaround was used. After
+  the emulator settled and system ANR dialogs were dismissed, the entire signed-APK suite passed.
+
+No-device launch does not provide speaker playback or an output fallback. Commercial login,
+in-app playback and physical DAC verification remain outside the requested scope.
+
 ## Completion scope and alpha 4 — September 17, 2026
 
 The user's final scope excludes commercial-app login and in-app playback verification.

@@ -8,14 +8,15 @@ The latest user decisions and remaining completion evidence are recorded in
 
 ## APK 다운로드 · 알파 버전
 
-[VirtualDAP 0.1.0-alpha.4 APK 다운로드](https://github.com/sampple-korea/VirtualDAP/releases/download/v0.1.0-alpha.4/VirtualDAP-0.1.0-alpha.4.apk)
-· [설치 안내와 제한 사항](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.4)
+[VirtualDAP 0.1.0-alpha.5 APK 다운로드](https://github.com/sampple-korea/VirtualDAP/releases/download/v0.1.0-alpha.5/VirtualDAP-0.1.0-alpha.5.apk)
+· [설치 안내와 제한 사항](https://github.com/sampple-korea/VirtualDAP/releases/tag/v0.1.0-alpha.5)
 
 Android 14 이상, 루팅 불필요. 기본 USB 출력과 한국어 음악 앱 중심 화면을 제공하는 초기 공개 테스트입니다.
 Apple Music·Spotify 등 모든 음악 서비스의 로그인·재생이나 실제 DAC 호환성이 검증된 완성판은 아닙니다.
-alpha.4는 앱 검색·업데이트·확인 후 삭제, 실행 조건과 테스트 결과 안내, DSD 조작 및 컨테이너 안정성을 개선했습니다.
+alpha.5는 USB/이어폰 없이 음악 앱 실행·설정을 허용하고, 앱 아이콘·검색 중심의 음악 화면,
+한곳에 모인 추가 메뉴와 앱별 관리 메뉴로 UI를 개편했습니다. 출력은 장치를 선택한 뒤 별도로 시작합니다.
 사용자가 정한 코드·UI·UX 정리 범위는 완료했으며, 로그인·상용 앱 내부 재생·물리 DAC 검증은 제외합니다.
-공개 alpha.1/alpha.2/alpha.3와 같은 서명이며, alpha.3 위에 업데이트 설치하는 것을 확인했습니다.
+이전 공개 알파와 같은 서명이며, alpha.4 위에 데이터 초기화 없이 업데이트 설치하는 것을 확인했습니다.
 기존 개발용 APK와 서명이 다르면 업데이트 설치가 안 될 수 있으며, 삭제 시 내부 앱·계정 데이터가 지워집니다.
 
 The container shares the device's Android framework. It supports APK and compatible split-package
