@@ -59,6 +59,10 @@ class PreparedContainerTests(unittest.TestCase):
         self.assertIn("user.status == BUserStatus.ENABLE", proxy)
         self.assertIn('@ProxyMethod("getUserInfo")', proxy)
         self.assertIn('@ProxyMethod("getProfiles")', proxy)
+        for query in ("getSeedAccountName", "getSeedAccountType", "getSeedAccountOptions"):
+            self.assertIn('@ProxyMethod("' + query + '")', proxy)
+        self.assertNotIn('@ProxyMethod("setSeedAccountData")', proxy)
+        self.assertNotIn('@ProxyMethod("clearSeedAccountData")', proxy)
         self.assertNotIn("method.invoke(who", proxy)
         self.assertNotIn("createUser(", proxy)
         self.assertNotIn("FLAG_PRIMARY()", proxy)

@@ -225,6 +225,11 @@ public final class MusicFixtureActivity extends Activity {
             if (users.getClass().getMethod("getProfileParent", int.class).invoke(users, 0) != null) {
                 throw new IllegalStateException("Full music space has an invented profile parent");
             }
+            for (String query : new String[]{"getSeedAccountName", "getSeedAccountType", "getSeedAccountOptions"}) {
+                if (users.getClass().getMethod(query).invoke(users) != null) {
+                    throw new IllegalStateException("Music space has invented device-setup account data");
+                }
+            }
             for (String permission : new String[]{"android.permission.MANAGE_USERS",
                     "android.permission.CREATE_USERS", "android.permission.QUERY_USERS"}) {
                 if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) {

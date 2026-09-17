@@ -643,6 +643,16 @@ absent-user lookup, one local profile, no profile parent and denied OS user-mana
 Debug/test builds, 153 JVM tests, 35 prepared-source checks and both API 36 fixture tests passed
 (70.252 seconds). Actual Google credential-form verification remains pending for this change.
 
+With the user metadata fix, Google's real AccountIntroActivity, WrapperControlledActivity and
+PreAddAccountActivity were created. PreAddAccount then failed when getSeedAccountOptions escaped
+to the host user service (MANAGE_USERS required). Music spaces do not provision device-setup
+accounts: read-only seed name/type/options now return absence without querying host data or
+intercepting protected seed-account writes. The fixture verifies all three absent values.
+The follow-up debug/test build and lint passed (zero errors, nine existing warnings), along with
+153 JVM tests, 35 prepared-source checks and all 24 API 36 runtime tests in 95.82 seconds.
+These results still do not establish that Google's credential-entry form or Apple's HTML
+bootstrap works; actual-app screen evidence must be recorded separately.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares

@@ -4,6 +4,15 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+## Current follow-up acceptance gate — after alpha 5
+
+The user subsequently required actual Apple Music credential entry and Google account-addition
+screens from YouTube Music, without submitting credentials or certifying subscription playback.
+The historical completion notes below apply only to their stated earlier scope. Alpha 5 is still
+the public build; welcome screens, an account picker and passing fixture tests do not satisfy the
+new gate. See [current compatibility evidence](APP_COMPATIBILITY.md) for observed failures and
+the independently tested container fixes. No alpha 6 login-compatibility release is yet claimed.
+
 ## No-device setup and alpha 5 — September 17, 2026
 
 The follow-up request decouples music-app opening/settings from audio readiness and redesigns

@@ -112,6 +112,23 @@ public class IUserManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("getSeedAccountName")
+    public static class GetSeedAccountName extends MethodHook {
+        @Override protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // Music spaces never provision an account during device/user creation. This is
+            // absence of seed data, not an empty/fabricated signed-in account. Do not inspect
+            // the device's setup accounts or change its protected seed-account write methods.
+            currentUser((Integer) args[0]);
+            return null;
+        }
+    }
+
+    @ProxyMethod("getSeedAccountType")
+    public static class GetSeedAccountType extends GetSeedAccountName {}
+
+    @ProxyMethod("getSeedAccountOptions")
+    public static class GetSeedAccountOptions extends GetSeedAccountName {}
+
     @ProxyMethod("getApplicationRestrictions")
     public static class GetApplicationRestrictions extends MethodHook {
         @Override protected Object hook(Object who, Method method, Object[] args) {
