@@ -4,6 +4,39 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+## Completion scope and alpha 4 — September 17, 2026
+
+The user's final scope excludes commercial-app login and in-app playback verification.
+Code/UX/interface cleanup, relevant feature review and downloadable delivery are completed for
+this scope; historical compatibility failures below are not reclassified as successful logins.
+See [quality review](FINAL_QUALITY_REVIEW.md) and [current requirements](PRODUCT_REQUIREMENTS.md).
+
+`v0.1.0-alpha.4` uses release commit `3f9509ac2a260966ba48f652a456dda65d5446aa`.
+Its release APK and `SHA256SUMS` are the only public assets; test APKs and signing material are private.
+
+- Version code 4, minimum API 34, `debuggable=false`, 63,954,374 bytes.
+- APK SHA-256: `55f21279048e159a851757f913705b54e2a92e68b4ddf7ba4f172fcd52953b5b`.
+- Same RSA-4096 signing certificate as earlier public alphas:
+  `273e0baf37614f54c634bd9cf7ae16826e7b2e2a38a7181a15db3ebd5c1b7c60`.
+  Ordinary update installation from the public alpha 3 succeeded without clearing data.
+- Local debug/release builds and lint, **149 JVM tests**, **30 prepared-source checks**, two
+  container PCM native tests and three DSP/USB native tests passed. Lint reports zero errors and
+  nine warnings, not a warning-free result. The release rebuild at the exact final commit passed.
+- Exact-commit GitHub run **35184103079** passed host checks and **20 tests per API**:
+  API 34 in 71.874 seconds, API 36 in 86.542 seconds.
+- The actual signed distribution APK passed all **20 tests in 92.901 seconds** on the
+  ordinary-UID API 36 emulator. Signature, four-ABI/native/license/retired-code boundary,
+  minimum API, release manifest and 16 KB ZIP alignment checks passed.
+- Failed/aborted candidates are not counted: the first run found a stale-service null dereference
+  after uninstall, fixed in `0d3e511`; a subsequent UI assertion inspected the Text label rather than
+  its actionable Button, corrected in `3f9509a` without changing product behavior. Both remote APIs
+  then passed. A local retry also stopped with `Process crashed` and the emulator later exited;
+  this was not accepted as evidence. After reboot without data wipe and dismissing the boot-time
+  System UI ANR, the final signed APK passed the full suite. No timeout or assertion was relaxed.
+
+The alpha label preserves the distinction between this completed engineering scope and unverified
+commercial-service/DAC compatibility. It is not a claim that software can be proven defect-free.
+
 ## Development checks and the pre-release integration gate
 
 Routine pushes/PRs run code-first verification: JVM/native tests, prepared-source checks, lint,
