@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <application android:label="VirtualDAP music fixture" android:theme="@android:style/Theme.Material.NoActionBar">
+        <provider android:name=".FixtureMainProvider" android:exported="false"
+            android:authorities="com.virtualdap.fixture.main.only" />
         <provider android:name=".FixtureContentProvider" android:exported="false"
             android:process=":provider"
             android:authorities="com.virtualdap.fixture.com.google.android.gms.provider;com.virtualdap.fixture.com.google.android.gsf.provider;com.virtualdap.fixture.com.android.vending.provider" />

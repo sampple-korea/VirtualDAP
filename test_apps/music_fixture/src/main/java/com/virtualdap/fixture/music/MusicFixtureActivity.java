@@ -84,6 +84,9 @@ public final class MusicFixtureActivity extends Activity {
                 String nonce = java.util.UUID.randomUUID().toString();
                 Bundle extras = new Bundle();
                 extras.putString("nonce", nonce);
+                if (!FixtureMainProvider.initialized) {
+                    throw new IllegalStateException("Main-process provider did not initialize in the main process");
+                }
                 for (String name : new String[]{"com.google.android.gms", "com.google.android.gsf", "com.android.vending"}) {
                     android.net.Uri uri = android.net.Uri.parse("content://com.virtualdap.fixture." + name + ".provider");
                     Bundle reply = getContentResolver().call(uri, "probe", getPackageName(), extras);
@@ -96,6 +99,9 @@ public final class MusicFixtureActivity extends Activity {
                         throw new IllegalStateException("Wrong provider, process or request payload: reply=" + reply
                                 + ", expectedPackage=" + getPackageName() + ", callerPid=" + android.os.Process.myPid()
                                 + ", callerUid=" + kernelUid() + ", nonce=" + nonce);
+                    }
+                    if (!reply.containsKey("mainProviderInitialized") || reply.getBoolean("mainProviderInitialized")) {
+                        throw new IllegalStateException("Main-only provider was initialized in the remote provider process");
                     }
                     try {
                         getContentResolver().call(uri, "deny", null, null);

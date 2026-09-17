@@ -51,6 +51,28 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_application_failure_is_not_a_fake_success_or_stranded_binder_wait(self):
+        activity = (JAVA / "app/BActivityThread.java").read_text()
+        begin = activity.index("    public void bindApplication(final String packageName")
+        dispatch = activity[begin:activity.index("    private Object createBindApplicationData", begin)]
+        self.assertIn("SynchronousDispatch.run", dispatch)
+        self.assertIn("if (!BlackBoxCore.get().getHandler().post(command))", dispatch)
+        self.assertNotIn("conditionVariable.block()", dispatch)
+        self.assertNotIn("makeApplication(true, null)", activity)
+        self.assertIn("initializationFailure.record(failure)", activity)
+        self.assertIn("public boolean isInit() {\n        initializationFailure.check();", activity)
+        begin = activity.index("    private void installProviders(Context context")
+        installer = activity[begin:activity.index("    public Object getPackageInfo()", begin)]
+        self.assertNotIn("catch (Throwable ignored)", installer)
+        self.assertIn('"Unable to initialize declared provider " + providerInfo.name, failure', installer)
+        self.assertIn('throw new IllegalStateException("Imported Application could not be created")', activity)
+
+    def test_main_process_providers_are_not_initialized_in_every_package_process(self):
+        activity = (JAVA / "app/BActivityThread.java").read_text()
+        self.assertNotIn("providerInfo.processName.equals(context.getPackageName())", activity)
+        self.assertEqual(2, activity.count("ProviderProcessPolicy.shouldInitialize(\n"
+                                         "                            processName, providerInfo.processName, providerInfo.multiprocess)"))
+
     def test_wifi_returns_real_service_data_and_maps_only_known_caller_field(self):
         proxy = (JAVA / "fake/service/IWifiManagerProxy.java").read_text()
         self.assertIn("WifiCallerAttribution.invoke(getBase(), method, args", proxy)

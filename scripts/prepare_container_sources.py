@@ -372,6 +372,70 @@ def prepare(upstream, dobby, overrides, output):
 
     activity_thread = package / "app/BActivityThread.java"
     content = activity_thread.read_text(encoding="utf-8")
+    content = replace_once(content, "    public boolean isInit() {\n        return mBoundApplication != null;",
+        "    private final top.niunaijun.blackbox.utils.compat.InitializationFailure initializationFailure =\n"
+        "            new top.niunaijun.blackbox.utils.compat.InitializationFailure();\n\n"
+        "    public boolean isInit() {\n        initializationFailure.check();\n        return mBoundApplication != null;")
+    content = replace_once(content,
+        "    public synchronized void handleBindApplication(String packageName, String processName) {",
+        '''    public synchronized void handleBindApplication(String packageName, String processName) {
+        initializationFailure.check();
+        try {
+            handleBindApplicationInternal(packageName, processName);
+        } catch (RuntimeException | Error failure) {
+            initializationFailure.record(failure);
+            throw failure;
+        }
+    }
+
+    private void handleBindApplicationInternal(String packageName, String processName) {''')
+    wrong_provider_process = ('                    if (processName.equals(providerInfo.processName) ||\n'
+                              '                            providerInfo.processName.equals(context.getPackageName()) || providerInfo.multiprocess) {')
+    if content.count(wrong_provider_process) != 2:
+        raise ValueError("Expected both provider installation paths to use the pinned process selector")
+    # A main-process provider is not automatically valid in every process of its package.
+    # Preserve explicitly declared multiprocess providers, but do not initialize main-only
+    # dependency graphs inside :background / :quick_launch / other private processes.
+    content = content.replace(wrong_provider_process,
+        '                    if (top.niunaijun.blackbox.utils.compat.ProviderProcessPolicy.shouldInitialize(\n'
+        '                            processName, providerInfo.processName, providerInfo.multiprocess)) {')
+    begin = content.index("    public void bindApplication(final String packageName, final String processName) {")
+    end = content.index("    private Object createBindApplicationData", begin)
+    content = content[:begin] + '''    public void bindApplication(final String packageName, final String processName) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            top.niunaijun.blackbox.utils.compat.SynchronousDispatch.run(command -> {
+                if (!BlackBoxCore.get().getHandler().post(command)) {
+                    throw new IllegalStateException("Application main thread rejected initialization");
+                }
+            }, () -> handleBindApplication(packageName, processName));
+        } else {
+            handleBindApplication(packageName, processName);
+        }
+    }
+
+''' + content[end:]
+    begin = content.index("    private void installProviders(Context context, String processName, List<ProviderInfo> provider) {")
+    end = content.index("    public Object getPackageInfo()", begin)
+    provider_installer = content[begin:end]
+    provider_installer = replace_once(provider_installer,
+        "                } catch (Throwable ignored) {\n                }",
+        '                } catch (Throwable failure) {\n'
+        '                    throw new IllegalStateException("Unable to initialize declared provider " + providerInfo.name, failure);\n'
+        '                }')
+    provider_installer = replace_once(provider_installer,
+        "            Binder.restoreCallingIdentity(origId);\n            ContentProviderDelegate.init();\n        }",
+        "            Binder.restoreCallingIdentity(origId);\n        }\n        ContentProviderDelegate.init();")
+    content = content[:begin] + provider_installer + content[end:]
+    # The imported Application subclass owns its service/dependency initialization. Falling back
+    # to plain Application after a real exception produces a broken, falsely started process.
+    begin = content.index("            try {\n                application = BRLoadedApk.get(loadedApk).makeApplication(false, null);")
+    end = content.index("            mInitialApplication = application;", begin)
+    content = content[:begin] + '''            application = BRLoadedApk.get(loadedApk).makeApplication(false, null);
+            if (application == null) {
+                throw new IllegalStateException("Imported Application could not be created");
+            }
+
+''' + content[end:]
     content = replace_once(
         content,
         "            if (BRActivityThread.get(BlackBoxCore.mainThread())._check_performNewIntents(null, null) != null) {",

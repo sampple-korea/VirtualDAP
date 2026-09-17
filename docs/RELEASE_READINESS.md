@@ -4,6 +4,20 @@ The user requested a downloadable GitHub Release when VirtualDAP reaches a usabl
 This is a delivery requirement, not permission to label an unverified development build stable.
 Physical-device/DAC testing is outside the requested validation scope.
 
+## Development checks and the pre-release integration gate
+
+Routine pushes/PRs run code-first verification: JVM/native tests, prepared-source checks, lint,
+debug/release builds and APK boundaries. They no longer start an emulator matrix automatically.
+Pure Wi-Fi caller and provider-process policies have host-JVM tests; real framework/IPC/audio
+integration fixtures remain available for the release gate.
+
+After batching improvements, manually dispatch `build_virtualdap.yml` with `run_runtime=true`
+for the selected release-candidate ref. Verify its resolved commit matches the release commit,
+then require the host job and both API 34/36 runtime jobs to pass before publication. A skipped
+runtime job on an ordinary push is **not** runtime evidence. Any subsequent product-code change
+invalidates the previous candidate's runtime result. Signed-release artifact checks below still
+apply. Do not publish simply because code-first CI is green.
+
 ## Published limited alpha 3
 
 `v0.1.0-alpha.3` is a public **prerelease** from

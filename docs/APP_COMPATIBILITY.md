@@ -398,6 +398,71 @@ the real Wi-Fi query and the new argument/result/exception tests. This does not 
 login success or cover every Wi-Fi service method. The provider-routing commit `5400129` separately
 passed host/API 34/API 36 CI in run `35138737543` before this Wi-Fi change.
 
+With the Wi-Fi fix installed, another supervised YouTube Music run reached the real `Accounts` /
+`Add account` dialog. At 2026-09-17 05:19 KST, selecting account addition reached the imported
+Google authenticator, whose framework `IAccountAuthenticator.Stub.addAccount_enforcePermission`
+rejected the request with `Access denied, requires: android.permission.ACCOUNT_MANAGER`.
+Android 16's framework manifest declares that permission `signature`, not an install-time or
+user-grantable runtime permission. The inspected Google services process remained alive; the
+earlier Wi-Fi crash was not reproduced in this captured interval. No credential form or account
+login succeeded. This remains a real compatibility blocker, not a request to copy phone account
+data, change the platform signature, fake an authenticator result or claim system privileges.
+The music-app screen/process check completed in **226.523 seconds**; it does not validate the
+failed account-addition flow. Wi-Fi commit `be4b2f9` passed host/API 34/API 36 CI in run `35145629580`.
+
+### Providers declared for the main process
+
+Subsequent Apple Music inspection displayed its real catalog, Home, menu and Settings screens.
+The 180-second supervised startup/process checks passed in **208.795** and **202.574 seconds**.
+These checks do not assert login. Navigation to Sign In was not completed before the second
+inspection window ended, so no login result is inferred from the later screen.
+
+The same environment logged repeated `ClassCastException`s in imported Store `:background` and
+`:quick_launch` processes, including main-process content providers. Inspection found that both
+container provider-installation paths initialized a provider when its declared process matched
+the package's main process, even if the current process was different. That extra condition is
+removed: only an exact current-process match or explicitly declared `multiprocess` remains.
+Android's `ProviderInfo` defines non-multiprocess providers as a single instance in `processName`.
+This is a concrete process-placement defect; whether it resolves those real Store crashes still
+requires a runtime comparison.
+
+The fixture declares a main-only provider with a process-local initialization marker. It requires
+that marker in the main activity process and rejects it in the separate provider process. The
+existing cross-process payload/UID/denial checks remain. Validation is pending.
+
+The already-running old-host comparison failed in **28.258 seconds** with `Main-only provider was
+initialized in the remote provider process`, confirming the fixture detects the misplaced instance.
+The initial process-selection build/lint/JVM run passed in **5m 24s**. Per the user's revised
+verification preference, no corrected-host emulator rerun was started: subsequent development
+uses code-first checks and reserves Android integration for a release-candidate gate.
+
+Both installation paths now share a pure, JVM-tested process selector. Exact main/private process
+matching, explicit multiprocess declarations and missing metadata are covered without a device.
+Pure Wi-Fi attribution tests also moved from instrumentation to the host JVM; the fixture's real
+OS query remains in the pre-release integration suite. This changes where checks execute, not
+whether their assertions are required.
+
+### Initialization failures and waiting callers
+
+Code inspection found off-main-thread initialization waiting on a condition variable that was
+opened only after successful initialization. An exception left the caller blocked indefinitely.
+Dispatch now uses a future that returns the original failure to the caller, handles a rejected
+main-thread post, retains interruption status and cancels work that is still queued when its
+caller is interrupted. It does not pretend that an action that actually hangs has completed.
+
+The inherited fallback from the declared Application to plain Application after creation failure
+is removed. Provider initialization errors are also propagated instead of discarded. A first
+initialization failure is latched for the lifetime of that app process, so partially populated
+binding fields cannot later report successful initialization or trigger an unsafe silent retry.
+Pure JVM tests cover completion, exception/error identity, rejection, interruption, queued-work
+cancellation and the persistent first-failure state. The final batched code validation passed:
+**143 JVM tests**, **29 prepared-source checks**, debug/test APK builds, debug lint and the packaged
+output boundary (**6m 20s** for the combined Gradle invocation). An intermediate lint invocation
+crashed while resolving a newly added test declaration; it is not counted as a passing check.
+The final invocation recompiled the completed source set and passed without disabling lint.
+No new emulator run was performed for this batch; these changes are not claimed as real-app login
+fixes. The release-candidate runtime gate remains outstanding.
+
 ### Authenticator discovery before the first account
 
 Code inspection found `getAuthenticatorTypes` enumerating saved accounts instead of installed

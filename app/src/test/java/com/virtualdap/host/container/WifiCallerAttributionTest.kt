@@ -1,13 +1,10 @@
-package com.virtualdap.host
+package com.virtualdap.host.container
 
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
 import top.niunaijun.blackbox.utils.compat.WifiCallerAttribution
 
-@RunWith(AndroidJUnit4::class)
-class WifiAttributionInstrumentedTest {
+class WifiCallerAttributionTest {
     interface WifiProbe {
         fun getConnectionInfo(caller: String?, feature: String?): Any?
         fun unrelated(caller: String?, feature: String?): Any?
@@ -45,6 +42,10 @@ class WifiAttributionInstrumentedTest {
             assertEquals("guest" to "guest", seen.last())
         }
         val unrelated = WifiProbe::class.java.getMethod("unrelated", String::class.java, String::class.java)
+        for (invalidHost in arrayOf(null, "")) {
+            WifiCallerAttribution.invoke(target, method, original, "guest", invalidHost)
+            assertEquals("guest" to "guest", seen.last())
+        }
         WifiCallerAttribution.invoke(target, unrelated, original, "guest", "host")
         assertEquals("guest" to "guest", seen.last())
         val unknownLayout = WifiProbe::class.java.getMethod("getConnectionInfo", String::class.java)

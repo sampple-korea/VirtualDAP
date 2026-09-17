@@ -20,6 +20,7 @@ public final class FixtureContentProvider extends ContentProvider {
         result.putInt("pid", android.os.Process.myPid());
         result.putInt("callerUid", android.os.Binder.getCallingUid());
         result.putInt("processUid", MusicFixtureActivity.kernelUid());
+        result.putBoolean("mainProviderInitialized", FixtureMainProvider.initialized);
         return result;
     }
 
