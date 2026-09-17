@@ -602,13 +602,21 @@ response and a sanitized failure, as well as the existing PCM capture and split-
 The local API 36 fixture passed both tests after correcting its expected exception type from
 IOException to AuthenticatorException. Debug build and 148 JVM tests passed; the preceding
 direct-transport/lifetime build also passed lint. The newer forwarding-layer change still requires
-the complete runtime/lint gate before release.
+the complete runtime/lint gate before release. Subsequent verification passed debug/test build,
+lint and all **24 local API 36 runtime tests in 95.324 seconds**, including four additional
+authenticator discovery tests (exact owner, cyclic forwarding, ambiguity, size bounds and ignored
+static/unrelated references). GitHub run `35246850378` passed the host debug/release build and code
+checks for `cbe363f`; its API 34/36 runtime jobs were skipped, not passed.
 
 Actual-app status remains incomplete: before the forwarding-layer change, Google Add account
 still reached Android's protected Transport through its modular Binder wrappers. Apple Music
 opened Home, Settings and Sign In with a real external WebView renderer, but HTML bootstrap
 timed out in `LoadingHTML` after 30 seconds. No credential-entry form, completed login or
 subscription playback is claimed from these observations.
+After the forwarding-layer change, Google returned an actual login continuation Intent targeting
+`UnpackingRedirectActivity` and attempted to initialize `com.google.android.gms.ui`; no
+ACCOUNT_MANAGER rejection appeared in that attempt. The continuation did not become a visible
+credential-entry form. This is partial progress, not successful Google login-screen compatibility.
 
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
