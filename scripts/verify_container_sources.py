@@ -245,6 +245,16 @@ class PreparedContainerTests(unittest.TestCase):
         self.assertIn("ComponentName(BlackBoxCore.getHostPkg(), ContainerControlService::class.java.name)", runtime)
         self.assertIn("controlConnection, Context.BIND_AUTO_CREATE", runtime)
 
+    def test_failed_process_startup_rolls_back_and_releases_waiters(self):
+        process = (JAVA / "core/system/BProcessManagerService.java").read_text()
+        self.assertIn("if (init == null) return false", process)
+        self.assertIn("InitializationAttempt.run", process)
+        self.assertIn("records.remove(processName, candidate)", process)
+        self.assertIn("mPidsSelfLocked.remove(candidate)", process)
+        self.assertIn("candidate.initLock.open()", process)
+        self.assertIn("process.remove(record.processName, record)", process)
+        self.assertNotIn("app.initLock.block()", process)
+
     def test_current_android_new_intents_use_activity_record(self):
         thread = (JAVA / "app/BActivityThread.java").read_text()
         block = thread.split("public void handleNewIntent(", 1)[1].split("public void scheduleReceiver(", 1)[0]

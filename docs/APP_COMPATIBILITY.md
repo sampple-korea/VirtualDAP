@@ -618,6 +618,19 @@ After the forwarding-layer change, Google returned an actual login continuation 
 ACCOUNT_MANAGER rejection appeared in that attempt. The continuation did not become a visible
 credential-entry form. This is partial progress, not successful Google login-screen compatibility.
 
+A subsequent trace localized that continuation failure to Android killing the new proxy process
+for `timeout publishing content providers`, before the container attach log appeared. The failed
+provider acquisition also exposed a code defect: a null initialization Bundle was dereferenced,
+leaving a published process record with a closed initialization latch. A second Add account attempt
+then waited indefinitely on that stale record. Startup now rejects a null response, rolls back the
+record on false/exception, and releases waiters in a finally path. Serialized startup no longer
+waits on an earlier incomplete record, and delayed process-death removal is identity-checked.
+Five new JVM cases cover success, missing response, exception, rollback failure and retry.
+The updated debug/test build, 153 JVM tests, 34 prepared-source checks and both local API 36
+fixture tests passed (64.621 seconds). Android's normal package compiler was run with `speed`
+on the test host before this fixture run; this is a test-environment optimization, not a product
+prerequisite, a timeout override or proof that the real-app continuation is fixed.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares

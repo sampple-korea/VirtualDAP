@@ -432,6 +432,47 @@ def prepare(upstream, dobby, overrides, output):
     content = content.replace('Slog.d(TAG, "System hooks installed successfully");', "")
     core.write_text(content, encoding="utf-8")
 
+    processes = package / "core/system/BProcessManagerService.java"
+    content = processes.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "                    if (app.initLock != null) {\n"
+        "                        app.initLock.block();\n"
+        "                    }\n"
+        "                    if (app.bActivityThread != null) {\n"
+        "                        return app;\n"
+        "                    }",
+        "                    // Startup is serialized by mProcessLock. A previous attempt has\n"
+        "                    // completed; never wait forever on a failed published record.\n"
+        "                    if (app.bActivityThread != null && app.bActivityThread.asBinder().isBinderAlive()) {\n"
+        "                        return app;\n"
+        "                    }\n"
+        "                    bProcess.remove(processName);\n"
+        "                    mPidsSelfLocked.remove(app);")
+    begin = content.index("            if (!initAppProcessL(app)) {")
+    end = content.index("        }\n        return app;", begin)
+    content = content[:begin] + '''            final ProcessRecord candidate = app;
+            final Map<String, ProcessRecord> records = bProcess;
+            boolean ready = top.niunaijun.blackbox.utils.compat.InitializationAttempt.run(() -> {
+                if (!initAppProcessL(candidate)) return false;
+                candidate.pid = getPid(BlackBoxCore.getContext(), ProxyManifest.getProcessName(candidate.bpid));
+                return candidate.bActivityThread != null && candidate.appThread != null && candidate.pid > 0;
+            }, () -> {
+                records.remove(processName, candidate);
+                mPidsSelfLocked.remove(candidate);
+                if (records.isEmpty()) mProcessMap.remove(buid, records);
+                candidate.kill();
+            }, () -> candidate.initLock.open());
+            if (!ready) app = null;
+''' + content[end:]
+    content = replace_once(content,
+        '        IBinder appThread = BundleCompat.getBinder(init, "_Black_|_client_");',
+        '        if (init == null) return false;\n'
+        '        IBinder appThread = BundleCompat.getBinder(init, "_Black_|_client_");')
+    content = replace_once(content,
+        "                process.remove(record.processName);",
+        "                process.remove(record.processName, record);")
+    processes.write_text(content, encoding="utf-8")
+
     activity_thread = package / "app/BActivityThread.java"
     content = activity_thread.read_text(encoding="utf-8")
     service_loader = "        ClassLoader classLoader = BRLoadedApk.get(mBoundApplication.info).getClassLoader();"
