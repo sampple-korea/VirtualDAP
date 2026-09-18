@@ -432,8 +432,38 @@ def prepare(upstream, dobby, overrides, output):
     content = content.replace('Slog.d(TAG, "System hooks installed successfully");', "")
     core.write_text(content, encoding="utf-8")
 
+    subscriber_proxy = package / "fake/service/IPhoneSubInfoProxy.java"
+    content = subscriber_proxy.read_text(encoding="utf-8")
+    content = replace_once(content, "    @Override\n    protected Object getWho() {",
+        "    @Override\n    protected void onBindMethod() {\n"
+        "        super.onBindMethod();\n"
+        "        // No physical SIM is imported into a music space. Preserve absence, not\n"
+        "        // spoofed identifiers or the host user's protected subscription identity.\n"
+        "        for (String name : new String[]{\"getIccSerialNumber\", \"getIccSerialNumberForSubscriber\",\n"
+        "                \"getSubscriberId\", \"getSubscriberIdForSubscriber\"}) {\n"
+        "            addMethodHook(new ContainerSubscriberIdentityHook(name));\n"
+        "        }\n"
+        "    }\n\n"
+        "    @Override\n    protected Object getWho() {")
+    subscriber_proxy.write_text(content, encoding="utf-8")
+
     processes = package / "core/system/BProcessManagerService.java"
     content = processes.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "        Set<Integer> usingPs = new HashSet<>();\n"
+        "        for (ActivityManager.RunningAppProcessInfo runningAppProcess : runningAppProcesses) {\n"
+        "            int i = parseBPid(runningAppProcess.processName);\n"
+        "            usingPs.add(i);\n"
+        "        }",
+        "        Set<Integer> usingPs = new HashSet<>();\n"
+        "        // A live/reserved client owns its slot even if Android's process snapshot\n"
+        "        // is temporarily incomplete. This method is called under mProcessLock.\n"
+        "        for (ProcessRecord reserved : mPidsSelfLocked) usingPs.add(reserved.bpid);\n"
+        "        if (runningAppProcesses != null) {\n"
+        "            for (ActivityManager.RunningAppProcessInfo runningAppProcess : runningAppProcesses) {\n"
+        "                usingPs.add(parseBPid(runningAppProcess.processName));\n"
+        "            }\n"
+        "        }")
     content = replace_once(content,
         "                    if (app.initLock != null) {\n"
         "                        app.initLock.block();\n"
@@ -472,6 +502,16 @@ def prepare(upstream, dobby, overrides, output):
         "                process.remove(record.processName);",
         "                process.remove(record.processName, record);")
     processes.write_text(content, encoding="utf-8")
+
+    activity_service = package / "core/system/am/BActivityManagerService.java"
+    content = activity_service.read_text(encoding="utf-8")
+    content = replace_once(content,
+        "                runningAppProcessInfo.processName = processRecord.processName;\n"
+        "                appProcessInfo.mAppProcessInfoList.add(runningAppProcessInfo);",
+        "                appProcessInfo.mAppProcessInfoList.add(\n"
+        "                        top.niunaijun.blackbox.utils.compat.RunningProcessSnapshot.forGuest(\n"
+        "                                runningAppProcessInfo, processRecord.processName));")
+    activity_service.write_text(content, encoding="utf-8")
 
     activity_thread = package / "app/BActivityThread.java"
     content = activity_thread.read_text(encoding="utf-8")

@@ -51,6 +51,29 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_subscriber_identity_queries_have_no_host_data_or_fabricated_ids(self):
+        proxy = (JAVA / "fake/service/IPhoneSubInfoProxy.java").read_text()
+        for method in ("getIccSerialNumber", "getIccSerialNumberForSubscriber", "getSubscriberId", "getSubscriberIdForSubscriber"):
+            self.assertIn('"' + method + '"', proxy)
+        self.assertIn("addMethodHook(new ContainerSubscriberIdentityHook(name))", proxy)
+        adapter = (JAVA / "fake/service/ContainerSubscriberIdentityHook.java").read_text()
+        self.assertIn("return null;", adapter)
+        self.assertNotIn("method.invoke", adapter)
+
+    def test_process_slots_keep_reservations_and_do_not_mutate_host_snapshots(self):
+        processes = (JAVA / "core/system/BProcessManagerService.java").read_text()
+        self.assertIn("for (ProcessRecord reserved : mPidsSelfLocked) usingPs.add(reserved.bpid)", processes)
+        self.assertIn("if (runningAppProcesses != null)", processes)
+        activity = (JAVA / "core/system/am/BActivityManagerService.java").read_text()
+        self.assertIn("RunningProcessSnapshot.forGuest", activity)
+        self.assertNotIn("runningAppProcessInfo.processName =", activity)
+
+    def test_intent_forwarding_never_deletes_unknown_guest_payloads(self):
+        adapter = (JAVA / "utils/IntentSanitizer.java").read_text()
+        self.assertIn("setExtrasClassLoader(classLoader)", adapter)
+        for destructive in ("bundle.get(", "bundle.remove(", "Class.forName(", "keySet()"):
+            self.assertNotIn(destructive, adapter)
+
     def test_user_metadata_is_limited_to_the_real_active_container_record(self):
         proxy = (JAVA / "fake/service/IUserManagerProxy.java").read_text()
         self.assertIn("requested != active", proxy)

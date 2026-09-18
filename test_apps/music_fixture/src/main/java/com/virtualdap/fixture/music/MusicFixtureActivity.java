@@ -230,6 +230,14 @@ public final class MusicFixtureActivity extends Activity {
                     throw new IllegalStateException("Music space has invented device-setup account data");
                 }
             }
+            android.telephony.TelephonyManager phone = getSystemService(android.telephony.TelephonyManager.class);
+            if (phone != null && (phone.getSimSerialNumber() != null || phone.getSubscriberId() != null)) {
+                throw new IllegalStateException("Music space disclosed or invented a physical SIM identity");
+            }
+            if (checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                throw new IllegalStateException("Privileged phone-state permission changed");
+            }
             for (String permission : new String[]{"android.permission.MANAGE_USERS",
                     "android.permission.CREATE_USERS", "android.permission.QUERY_USERS"}) {
                 if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) {

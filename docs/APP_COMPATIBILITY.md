@@ -653,6 +653,32 @@ The follow-up debug/test build and lint passed (zero errors, nine existing warni
 These results still do not establish that Google's credential-entry form or Apple's HTML
 bootstrap works; actual-app screen evidence must be recorded separately.
 
+The next Google attempt again encountered a cold provider-start timeout. After ordinary Android
+`cmd package compile -m speed -f` on the test host, a second attempt launched a fresh UI process
+without resetting data or blocking on the previous failed record. It progressed beyond the seed
+query, but a YouTube Music focus ANR and other defects still prevented credential entry:
+
+- The control-process Intent sanitizer tried to deserialize Google's modular AddAccountController,
+  could not load its class, and deleted the continuation payload. Application extras now remain
+  opaque in transit; the receiving application sets its own class loader without marker rewriting
+  or deleting unknown values. Two Android parcel tests passed (0.044 seconds), including a class
+  loader that cannot load the payload, nested bundles/lists, a Class value and selector extras.
+- Google check-in queried the host SIM serial number without Android's privileged identifier
+  permission and crashed. Music spaces do not import SIM identities: ICCID/IMSI queries return
+  absence, not real host identifiers, generated values or permission grants. The fixture checks
+  absent identities and denied privileged phone permission.
+- Restarting that service selected slot 0 even though YouTube Music still owned it. The engine
+  mutated framework process records to guest names; Android 16 ActivityManager can cache this
+  list (`rateLimitGetRunningAppProcesses`). Guest process reporting now copies the full parcelled
+  record before renaming it, and allocation also excludes the container's own reserved slots.
+  A dedicated Android test checks process name/package-array isolation and metadata preservation.
+
+These are code fixes for observed failures, not a successful commercial login or release claim.
+The combined debug/test build, 153 JVM tests, 38 prepared-source checks and APK product boundary
+passed. All 27 local ordinary-UID API 36 tests passed in 102.512 seconds, including the new parcel
+and process-snapshot tests plus the SIM-absence fixture assertions. This batch's full lint/release
+gate is delegated to its exact-commit CI; the preceding seed-metadata batch passed local lint.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares
