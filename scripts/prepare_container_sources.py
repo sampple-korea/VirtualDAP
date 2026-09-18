@@ -484,7 +484,6 @@ def prepare(upstream, dobby, overrides, output):
             final Map<String, ProcessRecord> records = bProcess;
             boolean ready = top.niunaijun.blackbox.utils.compat.InitializationAttempt.run(() -> {
                 if (!initAppProcessL(candidate)) return false;
-                candidate.pid = getPid(BlackBoxCore.getContext(), ProxyManifest.getProcessName(candidate.bpid));
                 return candidate.bActivityThread != null && candidate.appThread != null && candidate.pid > 0;
             }, () -> {
                 records.remove(processName, candidate);
@@ -497,11 +496,24 @@ def prepare(upstream, dobby, overrides, output):
     content = replace_once(content,
         '        IBinder appThread = BundleCompat.getBinder(init, "_Black_|_client_");',
         '        if (init == null) return false;\n'
-        '        IBinder appThread = BundleCompat.getBinder(init, "_Black_|_client_");')
+        '        int clientPid = top.niunaijun.blackbox.utils.compat.ProcessInitializationReply.pid(init, Process.myPid());\n'
+        '        if (clientPid == 0) return false;\n'
+        '        record.pid = clientPid;\n'
+        '        IBinder appThread = top.niunaijun.blackbox.utils.compat.ProcessInitializationReply.client(init);')
     content = replace_once(content,
         "                process.remove(record.processName);",
         "                process.remove(record.processName, record);")
     processes.write_text(content, encoding="utf-8")
+
+    startup_provider = package / "proxy/ProxyContentProvider.java"
+    content = startup_provider.read_text(encoding="utf-8")
+    content = replace_once(content,
+        '            Bundle bundle = new Bundle();\n'
+        '            BundleCompat.putBinder(bundle, "_Black_|_client_", BlackBoxCore.currentActivityThread());\n'
+        '            return bundle;',
+        '            return top.niunaijun.blackbox.utils.compat.ProcessInitializationReply.create(\n'
+        '                    BlackBoxCore.currentActivityThread(), android.os.Process.myPid());')
+    startup_provider.write_text(content, encoding="utf-8")
 
     activity_service = package / "core/system/am/BActivityManagerService.java"
     content = activity_service.read_text(encoding="utf-8")

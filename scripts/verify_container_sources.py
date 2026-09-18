@@ -51,6 +51,18 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_process_startup_uses_private_reply_not_cached_pid_lookup(self):
+        processes = (JAVA / "core/system/BProcessManagerService.java").read_text()
+        begin = processes.index("    public ProcessRecord startProcessLocked")
+        startup = processes[begin:processes.index("    private int getUsingBPidL", begin)]
+        self.assertNotIn("getPid(", startup)
+        self.assertIn("ProcessInitializationReply.pid(init, Process.myPid())", processes)
+        self.assertIn("if (clientPid == 0) return false", processes)
+        self.assertLess(processes.index("record.pid = clientPid"), processes.index("attachClientL(record, appThread)"))
+        provider = (JAVA / "proxy/ProxyContentProvider.java").read_text()
+        self.assertIn("ProcessInitializationReply.create(", provider)
+        self.assertIn("BlackBoxCore.currentActivityThread(), android.os.Process.myPid()", provider)
+
     def test_subscriber_identity_queries_have_no_host_data_or_fabricated_ids(self):
         proxy = (JAVA / "fake/service/IPhoneSubInfoProxy.java").read_text()
         for method in ("getIccSerialNumber", "getIccSerialNumberForSubscriber", "getSubscriberId", "getSubscriberIdForSubscriber"):

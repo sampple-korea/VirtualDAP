@@ -679,6 +679,26 @@ passed. All 27 local ordinary-UID API 36 tests passed in 102.512 seconds, includ
 and process-snapshot tests plus the SIM-absence fixture assertions. This batch's full lint/release
 gate is delegated to its exact-commit CI; the preceding seed-metadata batch passed local lint.
 
+The next actual Google attempt preserved `AddAccountController` through the continuation and
+reached `PreAddAccountActivity`, but ended in `ErrorActivity` with a server-communication message.
+The underlying recorded event was `[CheckinHelper] Checkin timed out` after 10 seconds: the
+check-in API received the request, but no successful completion was observed. This is **not**
+evidence of a credential-entry form, nor sufficient evidence to attribute the failure to Google's
+servers or the network. A prior cold UI-process attempt again hit Android's provider-publication
+timeout, and the following attempt successfully allocated a fresh process.
+
+Code review also found startup still discovering the newly initialized PID through Android's
+potentially cached process list. The private, non-exported provider now returns its own PID with
+its live client Binder. The control process validates the response before attaching the client,
+rejects missing/legacy replies and its own PID, and sets the PID before any rollback can run.
+It no longer declares successful initialization failed merely because a process snapshot is stale.
+Three Android tests cover parcel round-trip identity, old/missing replies and invalid PID/client
+publication. Debug/test builds, 153 JVM tests and 39 prepared-source checks passed. The combined
+API 36 suite passed 30 tests in 93.627 seconds; a redundant MainActivity launch occurred during
+the final UI test, so the UI class was rerun separately without manual interaction: all three
+tests passed in 30.669 seconds. This does not
+change the unresolved real-app credential-screen gate or either audio-output path.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares
