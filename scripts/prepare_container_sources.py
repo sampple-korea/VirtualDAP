@@ -447,6 +447,16 @@ def prepare(upstream, dobby, overrides, output):
         "    @Override\n    protected Object getWho() {")
     subscriber_proxy.write_text(content, encoding="utf-8")
 
+    subscription_proxy = package / "fake/service/ISubServiceProxy.java"
+    content = subscription_proxy.read_text(encoding="utf-8")
+    content = replace_once(content, "    @Override\n    protected Object getWho() {",
+        "    @Override\n    protected void onBindMethod() {\n"
+        "        super.onBindMethod();\n"
+        "        addMethodHook(new ContainerActiveSubscriptionsHook());\n"
+        "    }\n\n"
+        "    @Override\n    protected Object getWho() {")
+    subscription_proxy.write_text(content, encoding="utf-8")
+
     processes = package / "core/system/BProcessManagerService.java"
     content = processes.read_text(encoding="utf-8")
     content = replace_once(content,

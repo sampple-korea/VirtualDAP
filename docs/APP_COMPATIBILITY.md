@@ -699,6 +699,25 @@ the final UI test, so the UI class was rerun separately without manual interacti
 tests passed in 30.669 seconds. This does not
 change the unresolved real-app credential-screen gate or either audio-output path.
 
+The startup-handshake commit `25870c9` passed GitHub host verification in run `35328023198`;
+its optional runtime matrix was skipped, not passed. A fresh actual-app attempt at that commit
+started Google's UI process on the first try and preserved the controller, but check-in again
+timed out before credential entry. Diagnostic debugger stops subsequently confirmed that the
+check-in Intent reached both the container's `startService` hook and its service dispatcher.
+The debugger pause caused an Android ANR and invalidates that attempt as timing/compatibility
+evidence; Android's timeout was not disabled. After the debugger disconnected, Android restarted
+the service and check-in reached a new ordinary-UID crash in `ISub.getActiveSubIdList(boolean)`:
+the query escaped to host telephony and required `READ_PRIVILEGED_PHONE_STATE`.
+
+Music spaces now return an empty active-subscription ID array for this exact read-only API,
+whether visible-only or complete subscriptions were requested. No physical subscription is
+imported, no ID is invented, no privileged permission is granted and no SIM-write API is hooked.
+The fixture exercises both framework query variants in the imported app and still checks that
+privileged phone permission is denied. This is not a Google check-in success claim.
+The September 19 debug/test build passed in 1m 34s, along with 153 JVM tests, 40 prepared-source
+checks and the four-ABI APK boundary check. All 30 ordinary-UID API 36 integration tests passed
+in 113.064 seconds without manual UI interaction during the suite.
+
 A subsequent local split-update test failed when Android froze the cached container control process:
 the next Binder call reported `Transaction failed because process frozen`, then `DeadObjectException`.
 The host now holds an ordinary, non-exported service binding into the control process. This declares

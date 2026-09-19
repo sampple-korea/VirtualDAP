@@ -234,6 +234,16 @@ public final class MusicFixtureActivity extends Activity {
             if (phone != null && (phone.getSimSerialNumber() != null || phone.getSubscriberId() != null)) {
                 throw new IllegalStateException("Music space disclosed or invented a physical SIM identity");
             }
+            android.telephony.SubscriptionManager subscriptions =
+                    getSystemService(android.telephony.SubscriptionManager.class);
+            java.lang.reflect.Method activeSubscriptions = android.telephony.SubscriptionManager.class
+                    .getMethod("getActiveSubscriptionIdList", boolean.class);
+            for (boolean visibleOnly : new boolean[]{true, false}) {
+                int[] ids = (int[]) activeSubscriptions.invoke(subscriptions, visibleOnly);
+                if (ids == null || ids.length != 0) {
+                    throw new IllegalStateException("Music space disclosed or invented active SIM subscriptions");
+                }
+            }
             if (checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE")
                     == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 throw new IllegalStateException("Privileged phone-state permission changed");

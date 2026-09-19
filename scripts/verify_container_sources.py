@@ -51,6 +51,16 @@ class GeneratedOutputTests(unittest.TestCase):
 
 
 class PreparedContainerTests(unittest.TestCase):
+    def test_active_subscription_read_is_empty_without_host_query_or_writes(self):
+        proxy = (JAVA / "fake/service/ISubServiceProxy.java").read_text()
+        self.assertIn("addMethodHook(new ContainerActiveSubscriptionsHook())", proxy)
+        hook = (JAVA / "fake/service/ContainerActiveSubscriptionsHook.java").read_text()
+        self.assertIn('return "getActiveSubIdList"', hook)
+        self.assertIn("return new int[0]", hook)
+        self.assertIn("method.getReturnType() != int[].class", hook)
+        self.assertNotIn("method.invoke", hook)
+        self.assertNotIn("setSubscription", hook)
+
     def test_process_startup_uses_private_reply_not_cached_pid_lookup(self):
         processes = (JAVA / "core/system/BProcessManagerService.java").read_text()
         begin = processes.index("    public ProcessRecord startProcessLocked")
